@@ -101,10 +101,9 @@ class TestLayoutDeviceUnit:
 
     def _mock_detector(self, device_val):
         """Create a PPDocLayoutDetector with mocked model, ready for start()."""
+        self._require_layout_runtime()
         from glmocr.config import LayoutConfig
         from glmocr.layout.layout_detector import PPDocLayoutDetector
-
-        self._require_layout_runtime()
 
         cfg = LayoutConfig(device=device_val, **self._MOCK_LAYOUT_KWARGS)
         det = PPDocLayoutDetector(cfg)
