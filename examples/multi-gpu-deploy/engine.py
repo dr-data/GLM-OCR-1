@@ -19,6 +19,7 @@ def build_engine_cmd(
     model: str,
     port: int,
     extra_args: str = "",
+    engine_log_level: str = "warning",
 ) -> List[str]:
     """Build command to start sglang or vLLM service.
 
@@ -61,6 +62,8 @@ def build_engine_cmd(
             '{"method": "mtp", "num_speculative_tokens": 1}',
             "--served-model-name",
             "glm-ocr",
+            "--uvicorn-log-level",
+            engine_log_level.lower(),
         ]
     else:
         raise ValueError(f"Unknown engine: {engine}")
@@ -87,9 +90,8 @@ def start_engine(
     env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     if engine == "vllm":
         env["VLLM_LOGGING_LEVEL"] = engine_log_level.upper()
-        env["UVICORN_LOG_LEVEL"] = engine_log_level.lower()
 
-    cmd = build_engine_cmd(engine, model, port, extra_args)
+    cmd = build_engine_cmd(engine, model, port, extra_args, engine_log_level)
     log_path = Path(log_dir) / f"engine_gpu{gpu_id}_port{port}.log"
     log_fh = open(log_path, "w")
 
