@@ -101,6 +101,7 @@ class Pipeline:
         save_layout_visualization: bool = False,
         page_maxsize: Optional[int] = None,
         region_maxsize: Optional[int] = None,
+        preserve_order: bool = True,
     ) -> Generator[PipelineResult, None, None]:
         """Process a request; yield one ``PipelineResult`` per input unit.
 
@@ -112,6 +113,7 @@ class Pipeline:
             save_layout_visualization: Generate layout visualisation images.
             page_maxsize: Bound for the page queue.
             region_maxsize: Bound for the region queue.
+            preserve_order: Whether to emit results in input order.
 
         Yields:
             One ``PipelineResult`` per input URL (image or PDF).
@@ -162,7 +164,9 @@ class Pipeline:
         t_watchdog.start()
 
         try:
-            yield from self._emit_results(state, tracker, original_inputs)
+            yield from self._emit_results(
+                state, tracker, original_inputs, preserve_order=preserve_order
+            )
         finally:
             state.request_shutdown()
             t1.join(timeout=10)
@@ -291,12 +295,13 @@ class Pipeline:
         state: PipelineState,
         tracker: UnitTracker,
         original_inputs: List[str],
+        preserve_order: bool = True,
     ) -> Generator[PipelineResult, None, None]:
-        """Wait for units to complete and yield their formatted results
-        **in the original input order**.
+        """Wait for units to complete and yield formatted results.
 
-        Units may complete in arbitrary order; finished results are buffered
-        and yielded sequentially (unit 0 first, then 1, 2, …).
+        When ``preserve_order`` is True, units may complete in arbitrary order
+        but are buffered and yielded sequentially (unit 0, 1, 2, ...).
+        When ``preserve_order`` is False, each ready unit is yielded immediately.
 
         ``None`` from the ready queue signals a pipeline error (shutdown).
         """
@@ -305,12 +310,13 @@ class Pipeline:
         next_to_emit = 0
         num_units = tracker.num_units
 
-        while next_to_emit < num_units:
-            while next_to_emit in pending:
-                yield pending.pop(next_to_emit)
-                next_to_emit += 1
-            if next_to_emit >= num_units:
-                break
+        while (next_to_emit < num_units) if preserve_order else (len(built) < num_units):
+            if preserve_order:
+                while next_to_emit in pending:
+                    yield pending.pop(next_to_emit)
+                    next_to_emit += 1
+                if next_to_emit >= num_units:
+                    break
 
             u = tracker.wait_next_ready_unit()
             if u is None:
@@ -347,7 +353,7 @@ class Pipeline:
 
             state.release_unit_data(page_indices)
 
-            pending[u] = PipelineResult(
+            result = PipelineResult(
                 json_result=json_u,
                 markdown_result=md_u,
                 original_images=[original_inputs[u]],
@@ -356,3 +362,7 @@ class Pipeline:
                 layout_vis_images=vis_images or None,
             )
             built.add(u)
+            if preserve_order:
+                pending[u] = result
+            else:
+                yield result

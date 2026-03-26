@@ -218,6 +218,7 @@ def main():
                     image_paths,
                     stream=True,
                     save_layout_visualization=save_layout_vis,
+                    preserve_order=False,
                 ):
                     file_name = (
                         Path(result.original_images[0]).name

@@ -212,6 +212,7 @@ class GlmOcr:
         *,
         stream: bool = False,
         save_layout_visualization: bool = True,
+        preserve_order: bool = True,
         **kwargs: Any,
     ) -> Union[
         PipelineResult, List[PipelineResult], Generator[PipelineResult, None, None]
@@ -230,6 +231,7 @@ class GlmOcr:
 
             stream: If ``True``, yields one :class:`PipelineResult` at a time.
             save_layout_visualization: Whether to save layout visualization artifacts.
+            preserve_order: Whether to keep output order consistent with input order.
             **kwargs: Additional parameters for MaaS mode (return_crop_images,
                      need_layout_visualization, start_page_id, end_page_id, etc.)
 
@@ -250,12 +252,21 @@ class GlmOcr:
             images = [images]
 
         if stream:
-            return self._parse_stream(images, save_layout_visualization, **kwargs)
+            return self._parse_stream(
+                images,
+                save_layout_visualization,
+                preserve_order=preserve_order,
+                **kwargs,
+            )
 
         if self._use_maas:
             result_list = self._parse_maas(images, save_layout_visualization, **kwargs)
         else:
-            result_list = self._parse_selfhosted(images, save_layout_visualization)
+            result_list = self._parse_selfhosted(
+                images,
+                save_layout_visualization,
+                preserve_order=preserve_order,
+            )
 
         return result_list[0] if _single else result_list
 
@@ -263,6 +274,7 @@ class GlmOcr:
         self,
         images: List[Union[str, bytes, Path]],
         save_layout_visualization: bool = True,
+        preserve_order: bool = True,
         **kwargs: Any,
     ) -> Generator[PipelineResult, None, None]:
         """Internal: yield one PipelineResult per input. Used by parse(stream=True)."""
@@ -288,6 +300,7 @@ class GlmOcr:
         for result in self._stream_parse_selfhosted(
             images,
             save_layout_visualization=save_layout_visualization,
+            preserve_order=preserve_order,
         ):
             yield result
 
@@ -469,6 +482,7 @@ class GlmOcr:
         self,
         images: List[Union[str, bytes, Path]],
         save_layout_visualization: bool = True,
+        preserve_order: bool = True,
     ) -> List[PipelineResult]:
         """Parse using self-hosted vLLM/SGLang pipeline."""
         request_data = self._build_selfhosted_request(images)
@@ -476,6 +490,7 @@ class GlmOcr:
             self._pipeline.process(
                 request_data,
                 save_layout_visualization=save_layout_visualization,
+                preserve_order=preserve_order,
             )
         )
         return results
@@ -484,12 +499,14 @@ class GlmOcr:
         self,
         images: List[Union[str, bytes, Path]],
         save_layout_visualization: bool = True,
+        preserve_order: bool = True,
     ) -> Generator[PipelineResult, None, None]:
         """Streaming variant of self-hosted parse()."""
         request_data = self._build_selfhosted_request(images)
         for result in self._pipeline.process(
             request_data,
             save_layout_visualization=save_layout_visualization,
+            preserve_order=preserve_order,
         ):
             yield result
 
@@ -605,6 +622,7 @@ def parse(
     save_layout_visualization: bool = True,
     *,
     stream: bool = False,
+    preserve_order: bool = True,
     api_key: Optional[str] = None,
     api_url: Optional[str] = None,
     model: Optional[str] = None,
@@ -634,6 +652,7 @@ def parse(
         config_path: Config file path.
         save_layout_visualization: Whether to save layout visualization.
         stream: If ``True``, returns a generator.
+        preserve_order: Whether to keep output order consistent with input order.
         api_key:  API key.
         api_url:  MaaS API endpoint URL.
         model:    Model name.
@@ -654,5 +673,6 @@ def parse(
             images,
             stream=stream,
             save_layout_visualization=save_layout_visualization,
+            preserve_order=preserve_order,
             **kwargs,
         )
