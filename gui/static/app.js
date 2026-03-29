@@ -811,9 +811,17 @@
         });
     }
 
-    function _renderMdHtml(md) {
+    function _renderMdHtml(md, fileStem) {
         if (typeof marked === "undefined") return md;
         var html = marked.parse(md);
+        // Rewrite image paths: imgs/... → /api/output-image/{stem}/imgs/...
+        var stem = fileStem || currentFileStem;
+        if (stem) {
+            html = html.replace(
+                /src="(imgs\/[^"]+)"/g,
+                'src="/api/output-image/' + encodeURIComponent(stem) + '/$1"'
+            );
+        }
         html = html.replace(/\$\$([\s\S]*?)\$\$/g, function (_, tex) {
             try { return typeof katex !== "undefined" ? katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false }) : "$$" + tex + "$$"; }
             catch (e) { return "$$" + tex + "$$"; }
@@ -829,9 +837,10 @@
         var s = batchFileState[idx];
         if (!s) return;
         s.markdown = md;
+        s.fileStem = filename ? filename.replace(/\.[^.]+$/, "") : "";
         // Preview tab — simple render (region-annotated rebuild happens in wireBatchRegionSync)
         var mdEl = document.getElementById("bp-md-" + idx);
-        if (mdEl) mdEl.innerHTML = _renderMdHtml(md);
+        if (mdEl) mdEl.innerHTML = _renderMdHtml(md, s.fileStem);
         // Raw tab
         var rawEl = document.getElementById("bp-rawpre-" + idx);
         if (rawEl) rawEl.textContent = md;
@@ -874,7 +883,8 @@
                 block.className = "region-block";
                 block.setAttribute("data-page", pageIdx);
                 block.setAttribute("data-region", ri);
-                block.innerHTML = _renderMdHtml(content);
+                var stem = batchFileState[idx] ? batchFileState[idx].fileStem : "";
+                block.innerHTML = _renderMdHtml(content, stem);
 
                 // Markdown → PDF hover
                 (function (el, pg, region) {
