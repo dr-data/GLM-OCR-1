@@ -787,10 +787,12 @@
         var regions = (currentPageRegions._batch || {})[idx];
         if (!regions || !regions[pageIdx]) return;
         var cw = canvas.width, ch = canvas.height;
-        regions[pageIdx].forEach(function (r) {
+        regions[pageIdx].forEach(function (r, ri) {
             if (!r.bbox_2d || r.bbox_2d.length < 4) return;
             var rect = document.createElement("div");
             rect.className = "region-rect";
+            rect.setAttribute("data-page", pageIdx);
+            rect.setAttribute("data-region", ri);
             rect.style.left = (r.bbox_2d[0] / 1000 * cw) + "px";
             rect.style.top = (r.bbox_2d[1] / 1000 * ch) + "px";
             rect.style.width = ((r.bbox_2d[2] - r.bbox_2d[0]) / 1000 * cw) + "px";
@@ -809,24 +811,27 @@
         });
     }
 
+    function _renderMdHtml(md) {
+        if (typeof marked === "undefined") return md;
+        var html = marked.parse(md);
+        html = html.replace(/\$\$([\s\S]*?)\$\$/g, function (_, tex) {
+            try { return typeof katex !== "undefined" ? katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false }) : "$$" + tex + "$$"; }
+            catch (e) { return "$$" + tex + "$$"; }
+        });
+        html = html.replace(/\$([^\$\n]+?)\$/g, function (_, tex) {
+            try { return typeof katex !== "undefined" ? katex.renderToString(tex.trim(), { displayMode: false, throwOnError: false }) : "$" + tex + "$"; }
+            catch (e) { return "$" + tex + "$"; }
+        });
+        return html;
+    }
+
     function setBatchMarkdown(idx, md, taskId, filename) {
         var s = batchFileState[idx];
         if (!s) return;
         s.markdown = md;
-        // Preview tab
+        // Preview tab — simple render (region-annotated rebuild happens in wireBatchRegionSync)
         var mdEl = document.getElementById("bp-md-" + idx);
-        if (mdEl && typeof marked !== "undefined") {
-            var html = marked.parse(md);
-            html = html.replace(/\$\$([\s\S]*?)\$\$/g, function (_, tex) {
-                try { return typeof katex !== "undefined" ? katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false }) : "$$" + tex + "$$"; }
-                catch (e) { return "$$" + tex + "$$"; }
-            });
-            html = html.replace(/\$([^\$\n]+?)\$/g, function (_, tex) {
-                try { return typeof katex !== "undefined" ? katex.renderToString(tex.trim(), { displayMode: false, throwOnError: false }) : "$" + tex + "$"; }
-                catch (e) { return "$" + tex + "$"; }
-            });
-            mdEl.innerHTML = html;
-        }
+        if (mdEl) mdEl.innerHTML = _renderMdHtml(md);
         // Raw tab
         var rawEl = document.getElementById("bp-rawpre-" + idx);
         if (rawEl) rawEl.textContent = md;
@@ -837,6 +842,111 @@
             dl.href = URL.createObjectURL(blob);
             if (filename) dl.download = filename.replace(/\.[^.]+$/, "") + ".md";
         }
+    }
+
+    // Rebuild per-file markdown from JSON regions (1:1 mapping) + wire hover sync
+    function wireBatchRegionSync(idx) {
+        var regions = (currentPageRegions._batch || {})[idx];
+        if (!regions) return;
+        var mdEl = document.getElementById("bp-md-" + idx);
+        var overlay = document.getElementById("bp-overlay-" + idx);
+        if (!mdEl) return;
+
+        // Rebuild markdown preview: one div per region with data-page/data-region
+        var container = document.createDocumentFragment();
+        var pageKeys = Object.keys(regions).sort(function (a, b) { return a - b; });
+        for (var pi = 0; pi < pageKeys.length; pi++) {
+            var pageIdx = parseInt(pageKeys[pi], 10);
+            var pageRegions = regions[pageIdx] || [];
+            var section = document.createElement("div");
+            section.className = "page-section";
+            if (pageKeys.length > 1) {
+                var label = document.createElement("div");
+                label.className = "page-label";
+                label.textContent = "Page " + (pageIdx + 1);
+                section.appendChild(label);
+            }
+            for (var ri = 0; ri < pageRegions.length; ri++) {
+                var r = pageRegions[ri];
+                var content = r.content;
+                if (!content || (typeof content === "string" && !content.trim())) continue;
+                var block = document.createElement("div");
+                block.className = "region-block";
+                block.setAttribute("data-page", pageIdx);
+                block.setAttribute("data-region", ri);
+                block.innerHTML = _renderMdHtml(content);
+
+                // Markdown → PDF hover
+                (function (el, pg, region) {
+                    el.addEventListener("mouseenter", function () {
+                        el.classList.add("region-hover");
+                        // Highlight PDF box: navigate to page if needed, then activate
+                        var s = batchFileState[idx];
+                        if (s && s.page !== pg + 1) {
+                            s.page = pg + 1;
+                            s._render();
+                            setTimeout(function () { _activateBatchRect(idx, region); }, 300);
+                        } else {
+                            _activateBatchRect(idx, region);
+                        }
+                    });
+                    el.addEventListener("mouseleave", function () {
+                        el.classList.remove("region-hover");
+                        _clearBatchRectHighlight(idx);
+                    });
+                    el.addEventListener("click", function () {
+                        if (content) navigator.clipboard.writeText(content.trim()).then(function () {
+                            el.classList.add("region-copied");
+                            setTimeout(function () { el.classList.remove("region-copied"); }, 800);
+                        });
+                    });
+                })(block, pageIdx, ri);
+
+                section.appendChild(block);
+            }
+            container.appendChild(section);
+        }
+        mdEl.innerHTML = "";
+        mdEl.appendChild(container);
+
+        // PDF → markdown hover (event delegation on overlay)
+        if (overlay && !overlay._batchSyncWired) {
+            overlay._batchSyncWired = true;
+            overlay.addEventListener("mouseenter", function (e) {
+                var rect = e.target.closest(".region-rect");
+                if (!rect) return;
+                rect.classList.add("active");
+                var pg = rect.getAttribute("data-page");
+                var ri = rect.getAttribute("data-region");
+                var mdBlock = mdEl.querySelector('.region-block[data-page="' + pg + '"][data-region="' + ri + '"]');
+                if (mdBlock) {
+                    mdBlock.classList.add("region-hover");
+                    mdBlock.scrollIntoView({ behavior: "smooth", block: "center" });
+                }
+            }, true);
+            overlay.addEventListener("mouseleave", function (e) {
+                var rect = e.target.closest(".region-rect");
+                if (!rect) return;
+                rect.classList.remove("active");
+                mdEl.querySelectorAll(".region-hover").forEach(function (el) {
+                    el.classList.remove("region-hover");
+                });
+            }, true);
+        }
+    }
+
+    function _activateBatchRect(idx, regionIdx) {
+        var overlay = document.getElementById("bp-overlay-" + idx);
+        if (!overlay) return;
+        overlay.querySelectorAll(".region-rect.active").forEach(function (el) { el.classList.remove("active"); });
+        var target = overlay.querySelector('.region-rect[data-region="' + regionIdx + '"]');
+        if (target) target.classList.add("active");
+    }
+
+    function _clearBatchRectHighlight(idx) {
+        var overlay = document.getElementById("bp-overlay-" + idx);
+        if (!overlay) return;
+        overlay.querySelectorAll(".region-rect.active").forEach(function (el) { el.classList.remove("active"); });
     }
 
     function doBatchUpload(files, list) {
@@ -1032,6 +1142,25 @@
                     setBatchMarkdown(batchIdx, data.markdown, data.task_id, data.filename);
                 }
 
+                // Streaming region boxes + sync
+                if (data.partial_regions) {
+                    try {
+                        var pr = typeof data.partial_regions === "string"
+                            ? JSON.parse(data.partial_regions) : data.partial_regions;
+                        if (pr && pr.length) {
+                            if (!currentPageRegions._batch) currentPageRegions._batch = {};
+                            currentPageRegions._batch[batchIdx] = {};
+                            for (var p = 0; p < pr.length; p++) {
+                                currentPageRegions._batch[batchIdx][p] = (pr[p] || []).map(function (r) {
+                                    return { bbox_2d: r.bbox_2d, label: r.label || r.task_type, content: r.content };
+                                });
+                            }
+                            drawBatchRegions(batchIdx);
+                            wireBatchRegionSync(batchIdx);
+                        }
+                    } catch (e) {}
+                }
+
                 // Aggregate global progress bars
                 updateBatchTotalProgress();
             } else {
@@ -1043,6 +1172,28 @@
                     if (outputSection) outputSection.classList.remove("hidden");
                     if (outputPreview) outputPreview.textContent = data.markdown;
                     renderMarkdown(data.markdown, data.task_id, data.filename);
+                }
+
+                // Streaming region boxes on PDF overlay
+                if (data.partial_regions) {
+                    try {
+                        var pr = typeof data.partial_regions === "string"
+                            ? JSON.parse(data.partial_regions) : data.partial_regions;
+                        if (pr && pr.length) {
+                            // Update region data and redraw
+                            for (var p = 0; p < pr.length; p++) {
+                                currentPageRegions[p] = (pr[p] || []).map(function (r, i) {
+                                    return {
+                                        bbox_2d: r.bbox_2d,
+                                        label: r.label || r.task_type,
+                                        content: r.content,
+                                        regionIdx: r.index != null ? r.index : i,
+                                    };
+                                });
+                            }
+                            drawPageRegions(pdfCurrentPage - 1);
+                        }
+                    } catch (e) {}
                 }
             }
             var detail = data.stage_detail || data.stage || "processing";
@@ -1101,6 +1252,7 @@
                                         });
                                     }
                                     drawBatchRegions(bi);
+                                    wireBatchRegionSync(bi);
                                 }
                             }).catch(function () {});
                     })(batchIdx, taskId);

@@ -36,7 +36,8 @@ class TaskState:
     regions_done: int = 0
     markdown: str = ""
     regions_breakdown: str = ""      # e.g. "text:15 table:3 formula:2"
-    json_data: str = ""              # JSON-serialized region data for highlight sync
+    partial_regions: str = ""        # JSON-serialized streaming region data (bbox + partial content)
+    json_data: str = ""              # JSON-serialized final region data for highlight sync
     output_path: str = ""
     error: str = ""
     version: int = 0                 # bumped on every mutation for SSE change detection
@@ -60,6 +61,7 @@ class TaskState:
                 "regions_done": self.regions_done,
                 "markdown": self.markdown,
                 "regions_breakdown": self.regions_breakdown,
+                "partial_regions": self.partial_regions,
                 "output_path": self.output_path,
                 "error": self.error,
                 "version": self.version,
@@ -263,6 +265,24 @@ class PipelineWorker:
                 regions_in_queue = stats.get("region_queue_size", 0)
                 state.regions_total = regions_enqueued
                 state.regions_done = max(0, regions_enqueued - regions_in_queue)
+
+                # Streaming markdown + regions from completed results
+                try:
+                    partial_md = parser.get_partial_markdown()  # type: ignore[attr-defined]
+                    if partial_md and partial_md != state.markdown:
+                        state.markdown = partial_md
+                except Exception:
+                    pass
+                try:
+                    import json as _json
+                    pr = parser.get_partial_regions()  # type: ignore[attr-defined]
+                    if pr:
+                        pr_str = _json.dumps(pr, ensure_ascii=False)
+                        if pr_str != state.partial_regions:
+                            state.partial_regions = pr_str
+                except Exception:
+                    pass
+
                 # Build region breakdown string
                 by_label = stats.get("regions_by_label", {})
                 if by_label:

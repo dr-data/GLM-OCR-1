@@ -574,6 +574,18 @@ class GlmOcr:
             return self._pipeline.get_queue_stats()
         return None
 
+    def get_partial_markdown(self) -> Optional[str]:
+        """Return markdown from regions completed so far, or ``None``."""
+        if self._pipeline is not None:
+            return self._pipeline.get_partial_markdown()
+        return None
+
+    def get_partial_regions(self) -> Optional[list]:
+        """Return region data (bbox + partial content) for pages so far."""
+        if self._pipeline is not None:
+            return self._pipeline.get_partial_regions()
+        return None
+
     def close(self):
         """Close the parser and release resources."""
         if self._pipeline:

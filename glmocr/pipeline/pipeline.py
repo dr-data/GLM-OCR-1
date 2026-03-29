@@ -214,6 +214,79 @@ class Pipeline:
             "regions_by_label": label_counts,
         }
 
+    def get_partial_regions(self) -> Optional[list]:
+        """Return region data (bbox + content so far) for pages processed.
+
+        Returns a list-of-lists matching the JSON result format, but with
+        partial content from regions that have completed recognition.
+        Layout-detected regions that haven't finished OCR yet are included
+        with ``content: null``.
+        """
+        state = self._current_state
+        if state is None:
+            return None
+
+        pages_loaded = state.num_images_loaded[0]
+        if pages_loaded == 0:
+            return None
+
+        # Build a lookup of completed recognition results by (page, index)
+        done_content = {}
+        for page_idx, results in state._results_by_page.items():
+            for r in results:
+                done_content[(page_idx, r.get("index", 0))] = r.get("content")
+
+        all_pages = []
+        for page_idx in range(pages_loaded):
+            layout = state.layout_results_dict.get(page_idx, [])
+            page_regions = []
+            for r in layout:
+                content = done_content.get((page_idx, r.get("index", 0)))
+                page_regions.append({
+                    "index": r.get("index", 0),
+                    "label": r.get("label", "text"),
+                    "bbox_2d": r.get("bbox_2d"),
+                    "task_type": r.get("task_type"),
+                    "content": content,
+                })
+            all_pages.append(page_regions)
+
+        return all_pages if any(p for p in all_pages) else None
+
+    def get_partial_markdown(self) -> Optional[str]:
+        """Return markdown from regions completed so far.
+
+        Builds output from recognition results that have finished,
+        grouped by page.  Returns ``None`` if no processing is active
+        or no regions have completed yet.
+        """
+        state = self._current_state
+        if state is None:
+            return None
+
+        pages_loaded = state.num_images_loaded[0]
+        if pages_loaded == 0:
+            return None
+
+        page_parts = []
+        for page_idx in range(pages_loaded):
+            regions = state._results_by_page.get(page_idx, [])
+            if not regions:
+                continue
+            # Sort by region index, collect content
+            sorted_regions = sorted(regions, key=lambda r: r.get("index", 0))
+            lines = []
+            for r in sorted_regions:
+                content = r.get("content")
+                if content and isinstance(content, str) and content.strip():
+                    lines.append(content.strip())
+            if lines:
+                page_parts.append("\n\n".join(lines))
+
+        if not page_parts:
+            return None
+        return "\n\n---\n\n".join(page_parts)
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
