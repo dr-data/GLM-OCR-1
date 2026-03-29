@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+
+{% block title %}GLM-OCR — Pipeline{% endblock %}
+
+{% block content %}
+{# ── Server Status Bar ── #}
+<div id="server-bar" class="server-bar">
+    <span id="server-indicator" class="indicator"></span>
+    <span id="server-status-text">Checking server...</span>
+    <button id="btn-server-start" class="btn-server-start hidden">Start</button>
+    <a href="/settings" class="btn-settings" title="Advanced settings">⚙</a>
+</div>
+
+{# ── Upload Zone ── #}
+<div class="upload-zone" id="upload-zone">
+    <p>Drop PDF, Word, or image files here</p>
+    <input type="file" id="file-input" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp" multiple>
+    <p id="upload-status" class="text-muted"></p>
+    <button id="btn-retry" class="btn-retry hidden">Retry</button>
+</div>
+
+{# ── Pipeline + Progress (hidden until processing) ── #}
+<div id="pipeline-section" class="hidden">
+    <div class="pipeline" id="pipeline">
+        <div class="stage-box idle" id="stage-0">
+            <div class="name">PDF Input</div>
+            <div class="status">IDLE</div>
+        </div>
+        <span class="stage-arrow">───▶</span>
+        <div class="stage-box idle" id="stage-1">
+            <div class="name">Layout</div>
+            <div class="status">IDLE</div>
+        </div>
+        <span class="stage-arrow">───▶</span>
+        <div class="stage-box idle" id="stage-2">
+            <div class="name">OCR</div>
+            <div class="status">IDLE</div>
+        </div>
+        <span class="stage-arrow">───▶</span>
+        <div class="stage-box idle" id="stage-3">
+            <div class="name">Markdown</div>
+            <div class="status">IDLE</div>
+        </div>
+    </div>
+    <div class="progress-bar-wrap">
+        <div class="progress-bar-track">
+            <div class="progress-bar-fill" id="progress-fill"></div>
+        </div>
+        <div class="progress-bar-info">
+            <span class="progress-bar-label" id="progress-text">waiting</span>
+        </div>
+    </div>
+    <div class="progress-bar-wrap">
+        <div class="progress-bar-track">
+            <div class="progress-bar-fill" id="region-progress-fill"></div>
+        </div>
+        <div class="progress-bar-info">
+            <span class="progress-bar-label" id="region-progress-text"></span>
+            <span class="progress-bar-stats" id="region-progress-stats"></span>
+        </div>
+    </div>
+</div>
+
+{# ── Live Logs (collapsible) ── #}
+<div id="log-section" class="hidden">
+    <details id="log-details">
+        <summary>Live Logs</summary>
+        <div class="log-content" id="log-content"></div>
+    </details>
+</div>
+
+{# ── Batch file list with per-file pipeline status ── #}
+<div id="batch-section" class="hidden">
+    <h2>Batch Progress</h2>
+    <div id="batch-list"></div>
+</div>
+
+{# ── Comparison View: PDF Input + OCR Output side-by-side ── #}
+<div id="output-section" class="hidden">
+    <div class="layout-toggle-bar">
+        <button id="layout-toggle" class="btn-layout" title="Switch layout">&#x2B0C; Side-by-side</button>
+    </div>
+    <div class="comparison-view">
+        {# ── Left: PDF/Image Preview ── #}
+        <div class="compare-panel" id="pdf-panel">
+            <details class="compare-detail" open>
+                <summary>Input</summary>
+                <div class="pdf-preview-container" id="pdf-preview-container">
+                    <div class="pdf-controls">
+                        <button id="pdf-prev" title="Previous page">&laquo;</button>
+                        <span id="pdf-page-info">- / -</span>
+                        <button id="pdf-next" title="Next page">&raquo;</button>
+                        <span class="pdf-controls-sep">|</span>
+                        <button id="pdf-zoom-out" title="Zoom out">-</button>
+                        <span id="pdf-zoom-info">100%</span>
+                        <button id="pdf-zoom-in" title="Zoom in">+</button>
+                    </div>
+                    <div class="pdf-canvas-wrap" id="pdf-canvas-wrap">
+                        <canvas id="pdf-canvas"></canvas>
+                        <div class="pdf-overlay" id="pdf-overlay"></div>
+                    </div>
+                </div>
+            </details>
+        </div>
+        {# ── Right: OCR Markdown Output ── #}
+        <div class="compare-panel" id="ocr-panel">
+            <details class="compare-detail" open>
+                <summary>
+                    <span>Output</span>
+                    <span class="output-tabs-inline">
+                        <button class="tab active" data-tab="preview" id="tab-preview">Preview</button>
+                        <button class="tab" data-tab="raw" id="tab-raw">Raw</button>
+                        <button class="tab" data-tab="fullmd" id="tab-fullmd">Full MD</button>
+                    </span>
+                </summary>
+                <div class="output-panel" id="panel-preview">
+                    <div class="md-preview" id="md-preview"></div>
+                </div>
+                <div class="output-panel hidden" id="panel-raw">
+                    <pre class="output-preview" id="output-preview"></pre>
+                </div>
+                <div class="output-panel hidden" id="panel-fullmd">
+                    <pre class="output-preview" id="output-fullmd"></pre>
+                </div>
+                <div class="output-actions">
+                    <button id="btn-copy">Copy</button>
+                    <a id="btn-download" href="#" download="output.md">
+                        <button type="button">Download .md</button>
+                    </a>
+                </div>
+            </details>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/app.js"></script>
+{% endblock %}

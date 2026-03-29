@@ -1764,3 +1764,590 @@ class TestOCRClientConnectOllama:
         assert "messages" in sent_data
         assert sent_data["model"] == "my-model"
         assert sent_data["max_tokens"] == 10
+
+
+# ---------------------------------------------------------------------------
+# Region ↔ Markdown consistency tests
+# ---------------------------------------------------------------------------
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+OUTPUT_DIR = REPO_ROOT / "output"
+
+
+def _find_output_pairs():
+    """Find (json_path, md_path) pairs in the output directory."""
+    if not OUTPUT_DIR.exists():
+        return []
+    pairs = []
+    for d in sorted(OUTPUT_DIR.iterdir()):
+        if not d.is_dir() or d.name == "uploads":
+            continue
+        jsons = sorted(d.glob("*.json"))
+        mds = sorted(d.glob("*.md"))
+        # Skip _model.json files; use the main .json
+        jsons = [j for j in jsons if not j.name.endswith("_model.json")]
+        if jsons and mds:
+            pairs.append((jsons[0], mds[0]))
+    return pairs
+
+
+class TestRegionMarkdownConsistency:
+    """Verify that JSON region data aligns with the markdown output.
+
+    For each pipeline output found in ``output/``, check:
+    1. Region indices are sequential per page (0, 1, 2, …).
+    2. Every non-image region's content appears in the markdown.
+    3. The ResultFormatter produces consistent JSON→markdown.
+    """
+
+    @staticmethod
+    def _load_pair(json_path, md_path):
+        with open(json_path) as f:
+            regions = json.load(f)
+        md = md_path.read_text(encoding="utf-8")
+        return regions, md
+
+    @pytest.fixture(
+        params=_find_output_pairs(),
+        ids=[p[0].parent.name for p in _find_output_pairs()],
+    )
+    def output_pair(self, request):
+        return request.param
+
+    def test_region_indices_sequential(self, output_pair):
+        """Region indices must be sequential starting at 0 on every page."""
+        json_path, _ = output_pair
+        with open(json_path) as f:
+            regions = json.load(f)
+
+        for page_idx, page in enumerate(regions):
+            indices = [r["index"] for r in page]
+            expected = list(range(len(page)))
+            assert indices == expected, (
+                f"Page {page_idx}: indices {indices} != expected {expected}"
+            )
+
+    def test_every_region_has_bbox(self, output_pair):
+        """Every region must have a bbox_2d with 4 coordinates."""
+        json_path, _ = output_pair
+        with open(json_path) as f:
+            regions = json.load(f)
+
+        for page_idx, page in enumerate(regions):
+            for r in page:
+                bbox = r.get("bbox_2d")
+                assert bbox is not None and len(bbox) == 4, (
+                    f"Page {page_idx}, region {r['index']}: "
+                    f"invalid bbox_2d={bbox}"
+                )
+                # Normalized 0-1000
+                for coord in bbox:
+                    assert 0 <= coord <= 1000, (
+                        f"Page {page_idx}, region {r['index']}: "
+                        f"coord {coord} out of 0-1000 range"
+                    )
+
+    def test_region_content_in_markdown(self, output_pair):
+        """Each region's text content should appear in the markdown."""
+        json_path, md_path = output_pair
+        regions, md = self._load_pair(json_path, md_path)
+
+        for page_idx, page in enumerate(regions):
+            for r in page:
+                content = r.get("content")
+                if content is None or r.get("label") == "image":
+                    continue
+                # Extract a meaningful snippet (first 40 non-whitespace chars)
+                snippet = content.strip()
+                if not snippet:
+                    continue
+                # Use first line as the search key (most reliable)
+                first_line = snippet.split("\n")[0].strip()
+                # Strip markdown formatting for search
+                search = first_line.lstrip("#").lstrip("-").strip()
+                if len(search) < 5:
+                    continue
+                assert search in md, (
+                    f"Page {page_idx}, region {r['index']} "
+                    f"({r['label']}): first line not found in markdown.\n"
+                    f"  Looking for: {search!r}"
+                )
+
+    def test_total_region_content_in_markdown(self, output_pair):
+        """Total non-empty text regions should all contribute to markdown."""
+        json_path, md_path = output_pair
+        regions, md = self._load_pair(json_path, md_path)
+
+        total_regions = 0
+        found = 0
+        for page in regions:
+            for r in page:
+                content = r.get("content")
+                if content is None or r.get("label") == "image":
+                    continue
+                snippet = content.strip()
+                if not snippet:
+                    continue
+                total_regions += 1
+                first_line = snippet.split("\n")[0].lstrip("#").lstrip("-").strip()
+                if len(first_line) >= 5 and first_line in md:
+                    found += 1
+
+        if total_regions > 0:
+            ratio = found / total_regions
+            assert ratio >= 0.6, (
+                f"Only {found}/{total_regions} ({ratio:.0%}) region contents "
+                f"found in markdown. Expected >= 60%."
+            )
+
+
+class TestBboxTextCorrectness:
+    """Verify bounding boxes point to the correct text on the PDF.
+
+    For text-based PDFs: extract text at bbox coordinates using PyMuPDF,
+    normalize both strings, and compare.
+    For image-based PDFs: render the page, crop at bbox, verify non-blank.
+    """
+
+    @staticmethod
+    def _normalize(text: str) -> str:
+        """Normalize text for fuzzy comparison."""
+        import unicodedata
+
+        # NFKC normalises fancy quotes, ligatures, etc.
+        text = unicodedata.normalize("NFKC", text)
+        # Collapse whitespace
+        text = " ".join(text.split())
+        # Strip markdown formatting
+        text = text.lstrip("#").lstrip("-").lstrip("*").strip()
+        return text.lower()
+
+    @staticmethod
+    def _text_overlap(a: str, b: str, min_len: int = 10) -> float:
+        """Return the fraction of *a* tokens found in *b*."""
+        if len(a) < min_len or len(b) < min_len:
+            return 0.0
+        a_words = set(a.split())
+        b_words = set(b.split())
+        if not a_words:
+            return 0.0
+        return len(a_words & b_words) / len(a_words)
+
+    @staticmethod
+    def _find_text_pdf_pairs():
+        """Find (pdf, json) pairs where the PDF has extractable text."""
+        import fitz
+
+        pairs = []
+        output_dir = Path(__file__).resolve().parents[2] / "output"
+        uploads_dir = output_dir / "uploads"
+        if not output_dir.exists() or not uploads_dir.exists():
+            return pairs
+        for result_dir in sorted(output_dir.iterdir()):
+            if not result_dir.is_dir() or result_dir.name == "uploads":
+                continue
+            jsons = [
+                j
+                for j in sorted(result_dir.glob("*.json"))
+                if not j.name.endswith("_model.json")
+            ]
+            if not jsons:
+                continue
+            # Find matching PDF in uploads
+            pdf_candidates = list(uploads_dir.glob(result_dir.name + ".pdf"))
+            if not pdf_candidates:
+                continue
+            pdf_path = pdf_candidates[0]
+            # Check if PDF has extractable text
+            try:
+                doc = fitz.open(str(pdf_path))
+                page = doc.load_page(0)
+                text = page.get_text("text").strip()
+                doc.close()
+                if len(text) > 50:
+                    pairs.append((pdf_path, jsons[0]))
+            except Exception:
+                pass
+        return pairs
+
+    @staticmethod
+    def _find_image_pdf_pairs():
+        """Find (pdf, json) pairs where the PDF is image-based (scanned)."""
+        import fitz
+
+        pairs = []
+        output_dir = Path(__file__).resolve().parents[2] / "output"
+        uploads_dir = output_dir / "uploads"
+        if not output_dir.exists() or not uploads_dir.exists():
+            return pairs
+        for result_dir in sorted(output_dir.iterdir()):
+            if not result_dir.is_dir() or result_dir.name == "uploads":
+                continue
+            jsons = [
+                j
+                for j in sorted(result_dir.glob("*.json"))
+                if not j.name.endswith("_model.json")
+            ]
+            if not jsons:
+                continue
+            pdf_candidates = list(uploads_dir.glob(result_dir.name + ".pdf"))
+            if not pdf_candidates:
+                continue
+            pdf_path = pdf_candidates[0]
+            try:
+                doc = fitz.open(str(pdf_path))
+                page = doc.load_page(0)
+                text = page.get_text("text").strip()
+                doc.close()
+                if len(text) <= 50:
+                    pairs.append((pdf_path, jsons[0]))
+            except Exception:
+                pass
+        return pairs
+
+    # ── Text-based PDF tests ─────────────────────────────────────────
+
+    @pytest.fixture(
+        params=_find_text_pdf_pairs.__func__(),
+        ids=[p[0].stem for p in _find_text_pdf_pairs.__func__()],
+    )
+    def text_pdf_pair(self, request):
+        return request.param
+
+    def test_bbox_text_matches_pdf_text(self, text_pdf_pair):
+        """For text PDFs, text extracted at bbox should match region content."""
+        import fitz
+
+        pdf_path, json_path = text_pdf_pair
+        with open(json_path) as f:
+            regions = json.load(f)
+        doc = fitz.open(str(pdf_path))
+
+        matched = 0
+        tested = 0
+
+        for page_idx, page_regions in enumerate(regions):
+            if page_idx >= doc.page_count:
+                break
+            page = doc.load_page(page_idx)
+            rect = page.rect
+
+            for r in page_regions:
+                content = r.get("content")
+                if not content or r.get("label") == "image":
+                    continue
+                bbox = r.get("bbox_2d")
+                if not bbox or len(bbox) != 4:
+                    continue
+
+                # Denormalize bbox from 0-1000 to PDF points
+                x1 = bbox[0] / 1000 * rect.width
+                y1 = bbox[1] / 1000 * rect.height
+                x2 = bbox[2] / 1000 * rect.width
+                y2 = bbox[3] / 1000 * rect.height
+                clip = fitz.Rect(x1, y1, x2, y2)
+
+                pdf_text = page.get_text("text", clip=clip).strip()
+                if not pdf_text:
+                    continue
+
+                norm_content = self._normalize(content)
+                norm_pdf = self._normalize(pdf_text)
+                if len(norm_content) < 10 or len(norm_pdf) < 10:
+                    continue
+
+                tested += 1
+                overlap = self._text_overlap(norm_pdf, norm_content)
+                if overlap >= 0.5:
+                    matched += 1
+
+        doc.close()
+
+        assert tested > 0, "No testable regions found"
+        ratio = matched / tested
+        assert ratio >= 0.75, (
+            f"Only {matched}/{tested} ({ratio:.0%}) bbox regions matched "
+            f"PDF text. Expected >= 75%."
+        )
+
+    # ── Image-based (scanned) PDF tests ──────────────────────────────
+
+    @pytest.fixture(
+        params=_find_image_pdf_pairs.__func__(),
+        ids=[p[0].stem for p in _find_image_pdf_pairs.__func__()],
+    )
+    def image_pdf_pair(self, request):
+        return request.param
+
+    def test_bbox_crops_non_blank(self, image_pdf_pair):
+        """For scanned PDFs, cropping at bbox should yield non-blank images."""
+        import fitz
+        from PIL import Image
+        import numpy as np
+
+        pdf_path, json_path = image_pdf_pair
+        with open(json_path) as f:
+            regions = json.load(f)
+        doc = fitz.open(str(pdf_path))
+
+        non_blank = 0
+        tested = 0
+
+        for page_idx, page_regions in enumerate(regions[:3]):  # first 3 pages
+            if page_idx >= doc.page_count:
+                break
+            page = doc.load_page(page_idx)
+            # Render page as image (same DPI as pipeline)
+            scale = 200 / 72.0
+            mat = fitz.Matrix(scale, scale)
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            img_w, img_h = img.size
+
+            for r in page_regions:
+                bbox = r.get("bbox_2d")
+                if not bbox or len(bbox) != 4:
+                    continue
+                content = r.get("content")
+                if not content or r.get("label") == "image":
+                    continue
+
+                # Denormalize bbox to pixel coordinates
+                x1 = int(bbox[0] / 1000 * img_w)
+                y1 = int(bbox[1] / 1000 * img_h)
+                x2 = int(bbox[2] / 1000 * img_w)
+                y2 = int(bbox[3] / 1000 * img_h)
+
+                if x2 <= x1 or y2 <= y1:
+                    continue
+
+                cropped = img.crop((x1, y1, x2, y2))
+                arr = np.array(cropped)
+                tested += 1
+
+                # Check if image is non-blank (has variance > threshold)
+                std = arr.std()
+                if std > 5:  # not a uniform/blank region
+                    non_blank += 1
+
+        doc.close()
+
+        assert tested > 0, "No testable regions found"
+        ratio = non_blank / tested
+        assert ratio >= 0.9, (
+            f"Only {non_blank}/{tested} ({ratio:.0%}) bbox crops were "
+            f"non-blank. Expected >= 90%."
+        )
+
+
+class TestRegionOrderConsistency:
+    """Verify that the order of regions on the PDF matches the markdown order.
+
+    Tests aggregate across all pages in a document:
+    1. Region indices should follow top-to-bottom reading order (y-coordinate).
+    2. Region content should appear in the markdown in the same order as JSON.
+    """
+
+    @pytest.fixture(
+        params=_find_output_pairs(),
+        ids=[p[0].parent.name for p in _find_output_pairs()],
+    )
+    def output_pair(self, request):
+        return request.param
+
+    def test_bbox_y_order_matches_index_order(self, output_pair):
+        """Across all pages, region indices should follow top-to-bottom order."""
+        json_path, _ = output_pair
+        with open(json_path) as f:
+            regions = json.load(f)
+
+        total_ordered = 0
+        total_pairs = 0
+
+        for page in regions:
+            items = []
+            for r in page:
+                bbox = r.get("bbox_2d")
+                if bbox and len(bbox) == 4:
+                    items.append((r["index"], bbox[1]))
+            if len(items) < 2:
+                continue
+
+            total_pairs += len(items) - 1
+            total_ordered += sum(
+                1
+                for i in range(len(items) - 1)
+                if items[i][1] <= items[i + 1][1] + 30
+            )
+
+        if total_pairs == 0:
+            return
+        ratio = total_ordered / total_pairs
+        assert ratio >= 0.75, (
+            f"Only {total_ordered}/{total_pairs} ({ratio:.0%}) consecutive "
+            f"region pairs are in y-order across the document. Expected >= 75%."
+        )
+
+    def test_markdown_order_matches_region_index(self, output_pair):
+        """Across all pages, region content should appear in markdown in order."""
+        json_path, md_path = output_pair
+        with open(json_path) as f:
+            regions = json.load(f)
+        md = md_path.read_text(encoding="utf-8")
+
+        total_ordered = 0
+        total_pairs = 0
+
+        for page in regions:
+            positions = []
+            for r in page:
+                content = r.get("content")
+                if not content or r.get("label") == "image":
+                    continue
+                first_line = content.strip().split("\n")[0]
+                search = first_line.lstrip("#").lstrip("-").strip()[:40]
+                if len(search) < 8:
+                    continue
+                pos = md.find(search)
+                if pos >= 0:
+                    positions.append((r["index"], pos))
+
+            if len(positions) < 2:
+                continue
+
+            total_pairs += len(positions) - 1
+            total_ordered += sum(
+                1
+                for i in range(len(positions) - 1)
+                if positions[i][1] <= positions[i + 1][1]
+            )
+
+        if total_pairs == 0:
+            return
+        ratio = total_ordered / total_pairs
+        assert ratio >= 0.90, (
+            f"Only {total_ordered}/{total_pairs} ({ratio:.0%}) region pairs "
+            f"appear in correct order in the markdown. Expected >= 90%."
+        )
+
+
+class TestResultFormatterRegionMapping:
+    """Unit test: ResultFormatter produces consistent index mapping."""
+
+    def test_indices_consistent_after_format(self):
+        """Region indices in JSON output must be sequential after formatting."""
+        from glmocr.config import load_config
+        from glmocr.postprocess.result_formatter import ResultFormatter
+
+        cfg = load_config()
+        formatter = ResultFormatter(cfg.pipeline.result_formatter)
+
+        # Simulate pipeline output: 2 pages, mixed region types
+        grouped = [
+            [
+                {"index": 0, "label": "doc_title", "content": "Test Title",
+                 "bbox_2d": [100, 50, 900, 100], "task_type": "text"},
+                {"index": 1, "label": "text", "content": "First paragraph.",
+                 "bbox_2d": [100, 120, 900, 200], "task_type": "text"},
+                {"index": 2, "label": "display_formula",
+                 "content": "$$E = mc^2$$",
+                 "bbox_2d": [200, 220, 800, 280], "task_type": "formula"},
+                {"index": 3, "label": "text", "content": "After formula.",
+                 "bbox_2d": [100, 300, 900, 350], "task_type": "text"},
+                {"index": 4, "label": "image", "content": None,
+                 "bbox_2d": [150, 400, 850, 700], "task_type": "skip"},
+            ],
+            [
+                {"index": 0, "label": "text",
+                 "content": "Page two paragraph one.",
+                 "bbox_2d": [100, 50, 900, 120], "task_type": "text"},
+                {"index": 1, "label": "table",
+                 "content": "<table><tr><td>A</td><td>B</td></tr></table>",
+                 "bbox_2d": [100, 150, 900, 400], "task_type": "table"},
+            ],
+        ]
+
+        json_str, md_str, _ = formatter.process(grouped)
+        json_data = json.loads(json_str)
+
+        # Check indices are sequential per page
+        for page_idx, page in enumerate(json_data):
+            indices = [r["index"] for r in page]
+            expected = list(range(len(page)))
+            assert indices == expected, (
+                f"Page {page_idx}: indices {indices} != {expected}"
+            )
+
+        # Check every region's content appears in markdown
+        for page_idx, page in enumerate(json_data):
+            for r in page:
+                content = r.get("content")
+                if content is None or r.get("label") == "image":
+                    continue
+                # The content should appear in the markdown
+                snippet = content.strip().split("\n")[0].lstrip("#").strip()
+                if len(snippet) >= 3:
+                    assert snippet in md_str, (
+                        f"Page {page_idx}, region {r['index']}: "
+                        f"{snippet!r} not in markdown"
+                    )
+
+    def test_bbox_preserved_through_formatter(self):
+        """bbox_2d must survive formatting unchanged."""
+        from glmocr.config import load_config
+        from glmocr.postprocess.result_formatter import ResultFormatter
+
+        cfg = load_config()
+        formatter = ResultFormatter(cfg.pipeline.result_formatter)
+
+        bbox_input = [150, 200, 850, 400]
+        grouped = [
+            [
+                {"index": 0, "label": "text", "content": "Hello world",
+                 "bbox_2d": bbox_input, "task_type": "text"},
+            ]
+        ]
+
+        json_str, _, _ = formatter.process(grouped)
+        json_data = json.loads(json_str)
+
+        assert json_data[0][0]["bbox_2d"] == bbox_input
+
+    def test_merged_blocks_keep_sequential_indices(self):
+        """After merging (hyphenated text, formula numbers), indices reset."""
+        from glmocr.config import load_config
+        from glmocr.postprocess.result_formatter import ResultFormatter
+
+        cfg = load_config()
+        formatter = ResultFormatter(cfg.pipeline.result_formatter)
+
+        # formula_number followed by formula → should merge
+        grouped = [
+            [
+                {"index": 0, "label": "text", "content": "Intro text.",
+                 "bbox_2d": [100, 50, 900, 100], "task_type": "text"},
+                {"index": 1, "label": "formula_number", "content": "(1)",
+                 "bbox_2d": [800, 120, 850, 140], "task_type": "text"},
+                {"index": 2, "label": "display_formula",
+                 "content": "$$\na^2 + b^2 = c^2\n$$",
+                 "bbox_2d": [200, 120, 780, 180], "task_type": "formula"},
+                {"index": 3, "label": "text", "content": "Conclusion.",
+                 "bbox_2d": [100, 200, 900, 250], "task_type": "text"},
+            ]
+        ]
+
+        json_str, md_str, _ = formatter.process(grouped)
+        json_data = json.loads(json_str)
+
+        # formula_number should be consumed into formula; indices re-sequenced
+        page = json_data[0]
+        indices = [r["index"] for r in page]
+        assert indices == list(range(len(page))), (
+            f"After merging, indices must be sequential: {indices}"
+        )
+
+        # The merged formula should contain \\tag{1}
+        formula_regions = [r for r in page if r["label"] == "formula"]
+        assert any("\\tag{1}" in r["content"] for r in formula_regions), (
+            "Formula number should be merged into formula via \\tag{}"
+        )

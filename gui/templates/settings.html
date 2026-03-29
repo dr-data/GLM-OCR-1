@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block title %}GLM-OCR — Settings{% endblock %}
+
+{% block content %}
+<h2>Settings</h2>
+
+<form id="settings-form">
+    {# ── Mode selector ── #}
+    {% set is_maas = values.get("pipeline.maas.enabled", true) %}
+    <div class="setting-section">Mode</div>
+    <div class="setting-row">
+        <label for="mode-select">Deployment</label>
+        <select id="mode-select" data-path="pipeline.maas.enabled" data-type="mode_select">
+            <option value="true" {% if is_maas %}selected{% endif %}>MaaS (Cloud)</option>
+            <option value="false" {% if not is_maas %}selected{% endif %}>Self-hosted</option>
+        </select>
+    </div>
+
+    {# ── MaaS settings (hidden when self-hosted) ── #}
+    <div class="setting-section" data-group="maas">MaaS Settings</div>
+    <div class="setting-row" data-group="maas">
+        <label for="f-api-key">API Key</label>
+        <input type="password" id="f-api-key"
+               data-path="pipeline.maas.api_key" data-type="str"
+               value="{{ values.get('pipeline.maas.api_key', '') or '' }}"
+               placeholder="sk-... or ZHIPU_API_KEY env">
+    </div>
+    <div class="setting-row" data-group="maas">
+        <label for="f-api-url">API URL</label>
+        <input type="text" id="f-api-url"
+               data-path="pipeline.maas.api_url" data-type="str"
+               value="{{ values.get('pipeline.maas.api_url', '') }}">
+    </div>
+
+    {# ── Self-hosted settings (hidden when MaaS) ── #}
+    <div class="setting-section" data-group="selfhosted">Self-hosted Settings</div>
+    <div class="setting-row" data-group="selfhosted">
+        <label for="f-host">Host</label>
+        <input type="text" id="f-host"
+               data-path="pipeline.ocr_api.api_host" data-type="str"
+               value="{{ values.get('pipeline.ocr_api.api_host', '127.0.0.1') }}">
+    </div>
+    <div class="setting-row" data-group="selfhosted">
+        <label for="f-port">Port</label>
+        <input type="number" id="f-port"
+               data-path="pipeline.ocr_api.api_port" data-type="int"
+               value="{{ values.get('pipeline.ocr_api.api_port', 8090) }}">
+    </div>
+    <div class="setting-row" data-group="selfhosted">
+        <label for="f-workers">Max Workers</label>
+        <input type="number" id="f-workers"
+               data-path="pipeline.max_workers" data-type="int"
+               value="{{ values.get('pipeline.max_workers', 16) }}">
+    </div>
+
+    {# ── Server control (self-hosted only) ── #}
+    <div class="setting-section" data-group="selfhosted">Server Control</div>
+    <div class="setting-row server-row" data-group="selfhosted">
+        <label>GLM-OCR (vLLM)</label>
+        <div class="server-controls">
+            <button type="button" id="btn-install-vllm" class="btn-install hidden">Install</button>
+            <button type="button" id="btn-docker-vllm" class="btn-install hidden">Docker Pull</button>
+            <button type="button" id="btn-start-vllm">Start</button>
+            <button type="button" id="btn-stop-vllm">Stop</button>
+            <button type="button" id="btn-logs-vllm" class="btn-logs" title="View server logs">Logs</button>
+            <span id="status-vllm" class="server-status stopped">checking…</span>
+        </div>
+        <div id="note-vllm" class="server-note hidden"></div>
+    </div>
+    <div class="setting-row server-row" data-group="selfhosted">
+        <label>MLX-VLM</label>
+        <div class="server-controls">
+            <button type="button" id="btn-install-mlx" class="btn-install hidden">Install</button>
+            <button type="button" id="btn-start-mlx">Start</button>
+            <button type="button" id="btn-stop-mlx">Stop</button>
+            <button type="button" id="btn-logs-mlx" class="btn-logs" title="View server logs">Logs</button>
+            <span id="status-mlx" class="server-status stopped">checking…</span>
+        </div>
+        <div id="note-mlx" class="server-note hidden"></div>
+    </div>
+    <div data-group="selfhosted">
+        <pre id="server-log-output" class="server-log-output hidden"></pre>
+        <button type="button" id="btn-clear-server-log" class="btn-clear-log hidden" title="Clear log">Clear Log</button>
+    </div>
+
+    {# ── Processing settings (always visible) ── #}
+    <div class="setting-section">Processing</div>
+    <div class="setting-row">
+        <label for="f-output">Output Dir</label>
+        <input type="text" id="f-output"
+               data-path="tui.output_dir" data-type="str"
+               value="{{ values.get('tui.output_dir', './output') }}">
+    </div>
+    <div class="setting-row">
+        <label for="f-dpi">PDF DPI</label>
+        <input type="number" id="f-dpi"
+               data-path="pipeline.page_loader.pdf_dpi" data-type="int"
+               value="{{ values.get('pipeline.page_loader.pdf_dpi', 200) }}">
+    </div>
+    <div class="setting-row">
+        <label for="f-threshold">Layout Threshold</label>
+        <input type="number" id="f-threshold" step="0.01"
+               data-path="pipeline.layout.threshold" data-type="float"
+               value="{{ values.get('pipeline.layout.threshold', 0.3) }}">
+    </div>
+
+    {# ── Post-processing toggles (always visible) ── #}
+    <div class="setting-section">Post-processing</div>
+    <div class="setting-row">
+        <label for="f-formulas">Merge formula numbers</label>
+        <input type="checkbox" id="f-formulas"
+               data-path="pipeline.result_formatter.enable_merge_formula_numbers" data-type="bool"
+               {% if values.get('pipeline.result_formatter.enable_merge_formula_numbers', true) %}checked{% endif %}>
+    </div>
+    <div class="setting-row">
+        <label for="f-text">Merge text blocks</label>
+        <input type="checkbox" id="f-text"
+               data-path="pipeline.result_formatter.enable_merge_text_blocks" data-type="bool"
+               {% if values.get('pipeline.result_formatter.enable_merge_text_blocks', true) %}checked{% endif %}>
+    </div>
+    <div class="setting-row">
+        <label for="f-bullets">Format bullet points</label>
+        <input type="checkbox" id="f-bullets"
+               data-path="pipeline.result_formatter.enable_format_bullet_points" data-type="bool"
+               {% if values.get('pipeline.result_formatter.enable_format_bullet_points', true) %}checked{% endif %}>
+    </div>
+    <div class="setting-row">
+        <label for="f-tables">HTML tables → MD tables</label>
+        <input type="checkbox" id="f-tables"
+               data-path="tui.convert_html_tables" data-type="bool"
+               {% if values.get('tui.convert_html_tables', true) %}checked{% endif %}>
+    </div>
+
+    {# ── Box display settings ── #}
+    <div class="setting-section">Box Overlay</div>
+    <div class="setting-row">
+        <label for="f-box-color">Box Color</label>
+        <input type="color" id="f-box-color" value="#00cccc">
+    </div>
+    <div class="setting-row">
+        <label for="f-box-outline-opacity">Outline Opacity (%)</label>
+        <input type="range" id="f-box-outline-opacity" min="0" max="100" step="5" value="30">
+        <span id="box-outline-opacity-val" style="min-width:36px;text-align:right">30%</span>
+    </div>
+    <div class="setting-row">
+        <label for="f-box-fill-opacity">Fill Opacity (%)</label>
+        <input type="range" id="f-box-fill-opacity" min="0" max="100" step="5" value="5">
+        <span id="box-fill-opacity-val" style="min-width:36px;text-align:right">5%</span>
+    </div>
+    <div class="setting-row">
+        <label for="f-box-active-outline-opacity">Active Outline Opacity (%)</label>
+        <input type="range" id="f-box-active-outline-opacity" min="0" max="100" step="5" value="80">
+        <span id="box-active-outline-opacity-val" style="min-width:36px;text-align:right">80%</span>
+    </div>
+    <div class="setting-row">
+        <label for="f-box-active-fill-opacity">Active Fill Opacity (%)</label>
+        <input type="range" id="f-box-active-fill-opacity" min="0" max="100" step="5" value="15">
+        <span id="box-active-fill-opacity-val" style="min-width:36px;text-align:right">15%</span>
+    </div>
+    <div class="setting-row">
+        <label for="f-box-border-width">Border Width (px)</label>
+        <input type="number" id="f-box-border-width" min="1" max="6" step="1" value="2">
+    </div>
+
+    {# ── Logging (always visible) ── #}
+    <div class="setting-section">Logging</div>
+    <div class="setting-row">
+        <label for="f-loglevel">Log Level</label>
+        <select id="f-loglevel" data-path="logging.level" data-type="log_select">
+            {% for lvl in ["DEBUG", "INFO", "WARNING", "ERROR"] %}
+            <option value="{{ lvl }}" {% if values.get('logging.level', 'INFO') == lvl %}selected{% endif %}>{{ lvl }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="setting-row" style="border-bottom: none; justify-content: flex-start;">
+        <button type="submit">Save</button>
+        <span class="status-msg" id="save-status"></span>
+    </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/app.js"></script>
+{% endblock %}

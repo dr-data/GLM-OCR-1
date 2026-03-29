@@ -42,6 +42,7 @@ class PipelineState:
 
         # ── Counters (stage 1 writes, main thread reads after join) ──
         self.num_images_loaded: List[int] = [0]
+        self.num_regions_enqueued: List[int] = [0]
         self.unit_indices_holder: List[Optional[List[int]]] = [None]
 
         # ── Recognition results (stage 3 appends, main thread reads) ─

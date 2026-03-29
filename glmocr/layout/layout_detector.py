@@ -30,6 +30,13 @@ class PPDocLayoutDetector(BaseLayoutDetector):
     Single instance, in-process batch inference. No multiprocessing workers.
     """
 
+    # Class-level cache: load model once, share across instances.
+    # Concurrent from_pretrained() in transformers 5.x races on meta tensors.
+    _load_lock = __import__("threading").Lock()
+    _cached_model = None       # shared PPDocLayoutV3ForObjectDetection
+    _cached_processor = None   # shared PPDocLayoutV3ImageProcessorFast
+    _cached_model_dir = None   # model_dir the cache was loaded from
+
     def __init__(self, config: "LayoutConfig"):
         """Initialize.
 
@@ -60,11 +67,26 @@ class PPDocLayoutDetector(BaseLayoutDetector):
         """Load model and processor once in the main process."""
         logger.debug("Initializing PP-DocLayoutV3...")
 
-        self._image_processor = PPDocLayoutV3ImageProcessorFast.from_pretrained(
-            self.model_dir
-        )
-        self._model = PPDocLayoutV3ForObjectDetection.from_pretrained(self.model_dir)
-        self._model.eval()
+        # Load model+processor once; subsequent instances reuse the cache.
+        cls = PPDocLayoutDetector
+        with cls._load_lock:
+            if cls._cached_model is None or cls._cached_model_dir != self.model_dir:
+                logger.debug("Loading PP-DocLayoutV3 model (first instance)…")
+                cls._cached_processor = (
+                    PPDocLayoutV3ImageProcessorFast.from_pretrained(self.model_dir)
+                )
+                cls._cached_model = (
+                    PPDocLayoutV3ForObjectDetection.from_pretrained(
+                        self.model_dir, low_cpu_mem_usage=False
+                    )
+                )
+                cls._cached_model.eval()
+                cls._cached_model_dir = self.model_dir
+            else:
+                logger.debug("Reusing cached PP-DocLayoutV3 model.")
+
+        self._image_processor = cls._cached_processor
+        self._model = cls._cached_model
 
         # Device selection priority:
         #   1. Explicit config.device ("cpu", "cuda", "cuda:N")
@@ -129,14 +151,71 @@ class PPDocLayoutDetector(BaseLayoutDetector):
         logger.debug(f"PP-DocLayoutV3 loaded on device: {self._device}")
 
     def stop(self):
-        """Unload model and processor."""
-        if self._model is not None:
-            if self._device.startswith("cuda"):
-                torch.cuda.empty_cache()
-            self._model = None
+        """Release instance references (shared model stays cached)."""
+        if self._model is not None and self._device and self._device.startswith("cuda"):
+            torch.cuda.empty_cache()
+        # Don't null out the class-level cache — other instances may still use it.
+        self._model = None
         self._image_processor = None
         self._device = None
         logger.debug("PP-DocLayoutV3 stopped.")
+
+    # ------------------------------------------------------------------
+    # Aspect-ratio-preserving preprocessing
+    # ------------------------------------------------------------------
+
+    def _resize_pad_images(self, images: List[Image.Image]) -> tuple:
+        """Resize images preserving aspect ratio, pad to model input size.
+
+        The default image processor stretches to 800×800, distorting the
+        aspect ratio and degrading detection accuracy on non-square pages.
+        This method resizes each image to fit within the target size while
+        keeping the original aspect ratio, then pads the remainder.
+
+        Returns:
+            ``(padded_images, transforms)`` where *transforms* is a list
+            of ``(scale, pad_left, pad_top)`` tuples for remapping
+            predictions back to original coordinates.
+        """
+        target_h = self._image_processor.size.get("height", 800)
+        target_w = self._image_processor.size.get("width", 800)
+        padded_images: List[Image.Image] = []
+        transforms: list = []
+        for img in images:
+            w, h = img.size
+            scale = min(target_w / w, target_h / h)
+            new_w = int(w * scale)
+            new_h = int(h * scale)
+            resized = img.resize((new_w, new_h), Image.Resampling.BICUBIC)
+            padded = Image.new("RGB", (target_w, target_h), (114, 114, 114))
+            pad_left = (target_w - new_w) // 2
+            pad_top = (target_h - new_h) // 2
+            padded.paste(resized, (pad_left, pad_top))
+            padded_images.append(padded)
+            transforms.append((scale, pad_left, pad_top))
+        return padded_images, transforms
+
+    def _remap_results_to_original(
+        self,
+        raw_results: List[Dict],
+        transforms: list,
+    ) -> List[Dict]:
+        """Remap detection results from padded space to original coords."""
+        for result, (scale, pad_left, pad_top) in zip(raw_results, transforms):
+            boxes = result["boxes"]
+            if boxes.numel() > 0:
+                boxes[:, 0] = (boxes[:, 0] - pad_left) / scale
+                boxes[:, 1] = (boxes[:, 1] - pad_top) / scale
+                boxes[:, 2] = (boxes[:, 2] - pad_left) / scale
+                boxes[:, 3] = (boxes[:, 3] - pad_top) / scale
+            if "polygon_points" in result:
+                for i, poly in enumerate(result["polygon_points"]):
+                    if poly is not None and hasattr(poly, "__len__") and len(poly) > 0:
+                        poly = np.array(poly, dtype=np.float32)
+                        poly[:, 0] = (poly[:, 0] - pad_left) / scale
+                        poly[:, 1] = (poly[:, 1] - pad_top) / scale
+                        result["polygon_points"][i] = poly
+        return raw_results
 
     def _apply_per_class_threshold(self, raw_results: List[Dict]):
         """Filter detections by per-class confidence thresholds.
@@ -293,18 +372,22 @@ class PPDocLayoutDetector(BaseLayoutDetector):
             chunk_end = min(chunk_start + self.batch_size, num_images)
             chunk_pil = pil_images[chunk_start:chunk_end]
 
-            inputs = self._image_processor(images=chunk_pil, return_tensors="pt")
+            # Resize preserving aspect ratio + pad to avoid stretching
+            padded_pil, transforms = self._resize_pad_images(chunk_pil)
+
+            inputs = self._image_processor(images=padded_pil, return_tensors="pt")
             inputs = {k: v.to(self._device) for k, v in inputs.items()}
 
             with torch.no_grad():
                 outputs = self._model(**inputs)
 
+            # Post-process in padded space
+            target_h = self._image_processor.size.get("height", 800)
+            target_w = self._image_processor.size.get("width", 800)
             target_sizes = torch.tensor(
-                [img.size[::-1] for img in chunk_pil], device=self._device
+                [[target_h, target_w]] * len(padded_pil), device=self._device
             )
             if self.threshold_by_class:
-                # Use the lowest threshold (per-class or global fallback)
-                # so post-processing doesn't discard valid detections early.
                 pre_threshold = min(
                     self.threshold, min(self.threshold_by_class.values())
                 )
@@ -312,8 +395,11 @@ class PPDocLayoutDetector(BaseLayoutDetector):
                 pre_threshold = self.threshold
 
             raw_results = self._post_process_chunk_with_fallback(
-                chunk_pil, outputs, target_sizes, pre_threshold, chunk_start
+                padded_pil, outputs, target_sizes, pre_threshold, chunk_start
             )
+
+            # Remap from padded space to original image coordinates
+            raw_results = self._remap_results_to_original(raw_results, transforms)
 
             if self.threshold_by_class:
                 raw_results = self._apply_per_class_threshold(raw_results)

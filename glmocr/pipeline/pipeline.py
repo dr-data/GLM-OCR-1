@@ -197,11 +197,21 @@ class Pipeline:
         state = self._current_state
         if state is None:
             return None
+        # Count regions by task_type from layout results
+        label_counts: Dict[str, int] = {}
+        for regions in state.layout_results_dict.values():
+            for r in regions:
+                lbl = r.get("task_type", "unknown")
+                label_counts[lbl] = label_counts.get(lbl, 0) + 1
+
         return {
             "page_queue_size": state.page_queue.qsize(),
             "page_queue_maxsize": state.page_queue.maxsize,
             "region_queue_size": state.region_queue.qsize(),
             "region_queue_maxsize": state.region_queue.maxsize,
+            "pages_loaded": state.num_images_loaded[0],
+            "regions_enqueued": state.num_regions_enqueued[0],
+            "regions_by_label": label_counts,
         }
 
     # ------------------------------------------------------------------

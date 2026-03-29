@@ -1,0 +1,27 @@
+pipeline:
+  maas:
+    enabled: false
+    api_key: ''
+    api_url: https://open.bigmodel.cn/api/paas/v4/layout_parsing
+    model: glm-ocr
+    request_timeout: 300
+  ocr_api:
+    api_host: localhost
+    api_port: 8090
+    model: mlx-community/GLM-OCR-bf16
+    api_path: /chat/completions
+  page_loader:
+    pdf_dpi: 200
+  layout:
+    threshold: 0.3
+  result_formatter:
+    enable_merge_formula_numbers: true
+    enable_merge_text_blocks: true
+    enable_format_bullet_points: true
+  max_workers: 16
+logging:
+  level: INFO
+tui:
+  output_dir: ./output
+  convert_html_tables: true
+  save_images: true

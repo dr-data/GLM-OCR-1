@@ -308,6 +308,7 @@ def _flush_layout_batch(
                 },
             ):
                 return
+            state.num_regions_enqueued[0] += 1
 
 
 # ======================================================================
