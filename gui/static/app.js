@@ -233,7 +233,8 @@
             document.getElementById("batch-section").classList.add("hidden");
             uploadSingleFile(accepted[0]);
         } else {
-            if (pipelineSection) pipelineSection.classList.add("hidden");
+            if (pipelineSection) pipelineSection.classList.remove("hidden");
+            if (logSection) logSection.classList.remove("hidden");
             document.getElementById("batch-section").classList.remove("hidden");
             uploadBatch(accepted);
         }
@@ -293,6 +294,29 @@
         if (outputPreview) outputPreview.textContent = "";
 
         log("Uploading: " + file.name);
+
+        // Show PDF/image preview immediately from local file
+        if (outputSection) outputSection.classList.remove("hidden");
+        var ext = file.name.split(".").pop().toLowerCase();
+        if (ext === "pdf" && typeof pdfjsLib !== "undefined") {
+            loadPdf(URL.createObjectURL(file));
+            var panel = document.getElementById("pdf-panel");
+            if (panel) panel.style.display = "";
+        } else if (["png","jpg","jpeg","tif","tiff","bmp","webp"].indexOf(ext) >= 0) {
+            var panel = document.getElementById("pdf-panel");
+            if (panel) panel.style.display = "";
+            var img = new Image();
+            img.onload = function () {
+                if (pdfCanvas) {
+                    var maxW = pdfCanvasWrap ? pdfCanvasWrap.clientWidth - 20 : 500;
+                    var scale = Math.min(maxW / img.width, 1);
+                    pdfCanvas.width = img.width * scale;
+                    pdfCanvas.height = img.height * scale;
+                    pdfCanvas.getContext("2d").drawImage(img, 0, 0, pdfCanvas.width, pdfCanvas.height);
+                }
+            };
+            img.src = URL.createObjectURL(file);
+        }
 
         // Step 1: Auto-start server
         setServerBar("starting", "Preparing server...");
@@ -608,6 +632,9 @@
 
     // ── Batch Upload ────────────────────────────────
     var batchResults = {};
+    var batchProgress = {};
+    var batchTasks = {};   // idx → {taskId, filename}
+    var batchActive = -1;  // which batch item is shown in the main output panel
     var batchTotal = 0;
     var batchDone = 0;
 
@@ -615,8 +642,23 @@
         var list = document.getElementById("batch-list");
         list.innerHTML = "";
         batchResults = {};
+        batchProgress = {};
+        batchTasks = {};
+        batchActive = -1;
         batchTotal = files.length;
         batchDone = 0;
+
+        // Reset global progress bars
+        var pf = document.getElementById("progress-fill");
+        var pl = document.getElementById("progress-text");
+        var rf = document.getElementById("region-progress-fill");
+        var rl = document.getElementById("region-progress-text");
+        var rs = document.getElementById("region-progress-stats");
+        if (pf) pf.style.width = "0%";
+        if (pl) pl.textContent = "0/" + files.length + " files";
+        if (rf) rf.style.width = "0%";
+        if (rl) rl.textContent = "";
+        if (rs) rs.textContent = "";
         if (uploadStatus) uploadStatus.textContent = "Uploading " + files.length + " files...";
         if (logSection) logSection.classList.remove("hidden");
         log("Batch upload: " + files.length + " files");
@@ -646,6 +688,157 @@
             });
     }
 
+    // Per-batch-file state: {pdfDoc, currentPage, totalPages, zoomLevel, markdown}
+    var batchFileState = {};
+
+    function initBatchFileUI(idx) {
+        var s = batchFileState[idx] = { pdfDoc: null, page: 1, total: 0, zoom: 1.0, markdown: "" };
+        var canvas = document.getElementById("bp-canvas-" + idx);
+        var wrap = document.getElementById("bp-wrap-" + idx);
+        var overlay = document.getElementById("bp-overlay-" + idx);
+
+        function render() {
+            if (!s.pdfDoc || !canvas) return;
+            s.pdfDoc.getPage(s.page).then(function (page) {
+                var cw = (wrap && wrap.clientWidth > 40) ? wrap.clientWidth - 20 : 500;
+                var ch = (wrap && wrap.clientHeight > 40) ? wrap.clientHeight - 20 : 500;
+                var vp0 = page.getViewport({ scale: 1 });
+                var base = Math.min(cw / vp0.width, ch / vp0.height);
+                var sc = base * s.zoom;
+                var vp = page.getViewport({ scale: sc });
+                canvas.width = vp.width;
+                canvas.height = vp.height;
+                page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise.then(function () {
+                    if (overlay && wrap) {
+                        var cr = canvas.getBoundingClientRect();
+                        var wr = wrap.getBoundingClientRect();
+                        overlay.style.left = (cr.left - wr.left + wrap.scrollLeft) + "px";
+                        overlay.style.top = (cr.top - wr.top + wrap.scrollTop) + "px";
+                        overlay.style.width = canvas.width + "px";
+                        overlay.style.height = canvas.height + "px";
+                    }
+                    drawBatchRegions(idx);
+                });
+            });
+            var pi = document.getElementById("bp-page-" + idx);
+            if (pi) pi.textContent = s.page + " / " + s.total;
+            var zi = document.getElementById("bp-zoom-" + idx);
+            if (zi) zi.textContent = Math.round(s.zoom * 100) + "%";
+        }
+
+        // Page nav
+        var item = document.getElementById("batch-item-" + idx);
+        if (item) {
+            item.addEventListener("click", function (e) {
+                var btn = e.target;
+                if (btn.classList.contains("bp-prev")) { if (s.page > 1) { s.page--; render(); } }
+                else if (btn.classList.contains("bp-next")) { if (s.page < s.total) { s.page++; render(); } }
+                else if (btn.classList.contains("bp-zin")) { s.zoom = Math.min(s.zoom + 0.25, 3.0); render(); }
+                else if (btn.classList.contains("bp-zout")) { s.zoom = Math.max(s.zoom - 0.25, 0.5); render(); }
+                // Tabs
+                else if (btn.classList.contains("bp-tab")) {
+                    var tab = btn.getAttribute("data-tab");
+                    item.querySelectorAll(".bp-tab").forEach(function (t) { t.classList.toggle("active", t.getAttribute("data-tab") === tab); });
+                    ["preview", "raw", "fullmd"].forEach(function (t) {
+                        var p = document.getElementById("bp-" + t + "-" + idx) || item.querySelector(".bp-panel-" + t);
+                        if (p) p.classList.toggle("hidden", t !== tab);
+                    });
+                    if (tab === "fullmd") {
+                        var el = document.getElementById("bp-fullpre-" + idx);
+                        if (el && s.markdown) el.textContent = s.markdown;
+                    }
+                }
+                // Copy
+                else if (btn.classList.contains("bp-copy")) {
+                    if (s.markdown) navigator.clipboard.writeText(s.markdown);
+                }
+            });
+        }
+
+        batchFileState[idx]._render = render;
+    }
+
+    function loadBatchPdf(idx, filename, blobUrl) {
+        var url = blobUrl || "/api/uploaded/" + encodeURIComponent(filename);
+        var s = batchFileState[idx];
+        if (!s) return;
+        if (typeof pdfjsLib === "undefined") return;
+        pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+        pdfjsLib.getDocument(url).promise.then(function (doc) {
+            s.pdfDoc = doc;
+            s.total = doc.numPages;
+            s.page = 1;
+            // Render immediately; if canvas has no layout yet, retry shortly
+            s._render();
+            setTimeout(function () { s._render(); }, 300);
+        }).catch(function (err) {
+            console.error("Batch PDF load error for idx " + idx + ":", err);
+        });
+    }
+
+    function drawBatchRegions(idx) {
+        var overlay = document.getElementById("bp-overlay-" + idx);
+        var canvas = document.getElementById("bp-canvas-" + idx);
+        if (!overlay || !canvas) return;
+        overlay.innerHTML = "";
+        var s = batchFileState[idx];
+        if (!s) return;
+        var pageIdx = s.page - 1;
+        var regions = (currentPageRegions._batch || {})[idx];
+        if (!regions || !regions[pageIdx]) return;
+        var cw = canvas.width, ch = canvas.height;
+        regions[pageIdx].forEach(function (r) {
+            if (!r.bbox_2d || r.bbox_2d.length < 4) return;
+            var rect = document.createElement("div");
+            rect.className = "region-rect";
+            rect.style.left = (r.bbox_2d[0] / 1000 * cw) + "px";
+            rect.style.top = (r.bbox_2d[1] / 1000 * ch) + "px";
+            rect.style.width = ((r.bbox_2d[2] - r.bbox_2d[0]) / 1000 * cw) + "px";
+            rect.style.height = ((r.bbox_2d[3] - r.bbox_2d[1]) / 1000 * ch) + "px";
+            rect.title = (r.label || "region") + " — click to copy";
+            (function (content) {
+                rect.addEventListener("click", function () {
+                    if (!content) return;
+                    navigator.clipboard.writeText(content.trim()).then(function () {
+                        rect.classList.add("copied");
+                        setTimeout(function () { rect.classList.remove("copied"); }, 800);
+                    });
+                });
+            })(r.content);
+            overlay.appendChild(rect);
+        });
+    }
+
+    function setBatchMarkdown(idx, md, taskId, filename) {
+        var s = batchFileState[idx];
+        if (!s) return;
+        s.markdown = md;
+        // Preview tab
+        var mdEl = document.getElementById("bp-md-" + idx);
+        if (mdEl && typeof marked !== "undefined") {
+            var html = marked.parse(md);
+            html = html.replace(/\$\$([\s\S]*?)\$\$/g, function (_, tex) {
+                try { return typeof katex !== "undefined" ? katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false }) : "$$" + tex + "$$"; }
+                catch (e) { return "$$" + tex + "$$"; }
+            });
+            html = html.replace(/\$([^\$\n]+?)\$/g, function (_, tex) {
+                try { return typeof katex !== "undefined" ? katex.renderToString(tex.trim(), { displayMode: false, throwOnError: false }) : "$" + tex + "$"; }
+                catch (e) { return "$" + tex + "$"; }
+            });
+            mdEl.innerHTML = html;
+        }
+        // Raw tab
+        var rawEl = document.getElementById("bp-rawpre-" + idx);
+        if (rawEl) rawEl.textContent = md;
+        // Download
+        var dl = document.getElementById("bp-dl-" + idx);
+        if (dl) {
+            var blob = new Blob([md], { type: "text/markdown" });
+            dl.href = URL.createObjectURL(blob);
+            if (filename) dl.download = filename.replace(/\.[^.]+$/, "") + ".md";
+        }
+    }
+
     function doBatchUpload(files, list) {
         startMainServerLogPoll();
         for (var i = 0; i < files.length; i++) {
@@ -665,23 +858,106 @@
                     '<span class="batch-status" id="bstat-' + idx + '">uploading</span>';
                 details.appendChild(summary);
 
-                var preview = document.createElement("pre");
-                preview.className = "batch-preview";
-                preview.id = "bprev-" + idx;
-                preview.textContent = "Waiting...";
-                details.appendChild(preview);
+                // Per-file progress bar
+                var barWrap = document.createElement("div");
+                barWrap.className = "batch-progress-bar";
+                barWrap.innerHTML =
+                    '<div class="progress-bar-track"><div class="batch-fill" id="bfill-' + idx + '"></div></div>' +
+                    '<span class="batch-progress-label" id="blabel-' + idx + '"></span>';
+                details.appendChild(barWrap);
 
+                // Full comparison view matching single-file UI
+                var cv = document.createElement("div");
+                cv.className = "batch-comparison comparison-view";
+                cv.innerHTML =
+                    // Left: PDF with controls
+                    '<div class="compare-panel">' +
+                        '<details class="compare-detail" open><summary>Input</summary>' +
+                        '<div class="pdf-preview-container">' +
+                            '<div class="pdf-controls">' +
+                                '<button class="bp-prev" data-idx="' + idx + '" title="Previous">&laquo;</button>' +
+                                '<span class="bp-page-info" id="bp-page-' + idx + '">- / -</span>' +
+                                '<button class="bp-next" data-idx="' + idx + '" title="Next">&raquo;</button>' +
+                                '<span class="pdf-controls-sep">|</span>' +
+                                '<button class="bp-zout" data-idx="' + idx + '">-</button>' +
+                                '<span class="bp-zoom-info" id="bp-zoom-' + idx + '">100%</span>' +
+                                '<button class="bp-zin" data-idx="' + idx + '">+</button>' +
+                            '</div>' +
+                            '<div class="pdf-canvas-wrap" id="bp-wrap-' + idx + '">' +
+                                '<canvas id="bp-canvas-' + idx + '"></canvas>' +
+                                '<div class="pdf-overlay" id="bp-overlay-' + idx + '"></div>' +
+                            '</div>' +
+                        '</div>' +
+                        '</details>' +
+                    '</div>' +
+                    // Right: Output with tabs
+                    '<div class="compare-panel">' +
+                        '<details class="compare-detail" open><summary>' +
+                            '<span>Output</span>' +
+                            '<span class="output-tabs-inline">' +
+                                '<button class="tab active bp-tab" data-idx="' + idx + '" data-tab="preview">Preview</button>' +
+                                '<button class="tab bp-tab" data-idx="' + idx + '" data-tab="raw">Raw</button>' +
+                                '<button class="tab bp-tab" data-idx="' + idx + '" data-tab="fullmd">Full MD</button>' +
+                            '</span>' +
+                        '</summary>' +
+                        '<div class="output-panel bp-panel-preview" id="bp-preview-' + idx + '">' +
+                            '<div class="md-preview" id="bp-md-' + idx + '"></div>' +
+                        '</div>' +
+                        '<div class="output-panel hidden bp-panel-raw" id="bp-raw-' + idx + '">' +
+                            '<pre class="output-preview" id="bp-rawpre-' + idx + '"></pre>' +
+                        '</div>' +
+                        '<div class="output-panel hidden bp-panel-fullmd" id="bp-fullmd-' + idx + '">' +
+                            '<pre class="output-preview" id="bp-fullpre-' + idx + '"></pre>' +
+                        '</div>' +
+                        '<div class="output-actions">' +
+                            '<button class="bp-copy" data-idx="' + idx + '">Copy</button>' +
+                            '<a class="bp-dl" id="bp-dl-' + idx + '" href="#" download="output.md"><button type="button">Download .md</button></a>' +
+                        '</div>' +
+                        '</details>' +
+                    '</div>';
+                details.appendChild(cv);
+
+                // Append to DOM and open FIRST so elements have layout
                 list.appendChild(details);
+                details.open = true;
+
+                // Wire per-file PDF.js + controls + tabs (after DOM insert)
+                initBatchFileUI(idx);
+
+                // Load PDF/image preview immediately from local file
+                (function (f, i) {
+                    var ext = f.name.split(".").pop().toLowerCase();
+                    if (ext === "pdf" && typeof pdfjsLib !== "undefined") {
+                        var localUrl = URL.createObjectURL(f);
+                        loadBatchPdf(i, null, localUrl);
+                    } else if (["png","jpg","jpeg","tif","tiff","bmp","webp"].indexOf(ext) >= 0) {
+                        var canvas = document.getElementById("bp-canvas-" + i);
+                        if (canvas) {
+                            var img = new Image();
+                            img.onload = function () {
+                                var wrap = document.getElementById("bp-wrap-" + i);
+                                var maxW = wrap ? wrap.clientWidth - 20 : 500;
+                                var scale = Math.min(maxW / img.width, 1);
+                                canvas.width = img.width * scale;
+                                canvas.height = img.height * scale;
+                                canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+                            };
+                            img.src = URL.createObjectURL(f);
+                        }
+                    }
+                })(file, idx);
 
                 var fd = new FormData();
                 fd.append("file", file);
+
                 fetch("/api/upload", { method: "POST", body: fd })
                     .then(function (r) { return r.json(); })
                     .then(function (data) {
                         if (data.task_id) {
+                            batchTasks[idx] = { taskId: data.task_id, filename: data.filename || file.name };
                             log("Started: " + file.name + " (task " + data.task_id + ")");
                             setBatchStatus(idx, "processing", "running");
-                            details.open = true;
+
                             connectSSE(data.task_id, idx);
                         } else {
                             setBatchStatus(idx, data.error || "failed", "error");
@@ -733,6 +1009,31 @@
         function handleProgress(data) {
             if (batchIdx !== null && batchIdx !== undefined) {
                 updateBatchPipeline(batchIdx, data);
+
+                // Track per-file progress
+                batchProgress[batchIdx] = {
+                    pages_done: data.pages_done || 0,
+                    pages_total: data.pages_total || 0,
+                    regions_done: data.regions_done || 0,
+                    regions_total: data.regions_total || 0,
+                    regions_breakdown: data.regions_breakdown || "",
+                };
+
+                // Per-file progress bar
+                var fileFill = document.getElementById("bfill-" + batchIdx);
+                var fileLabel = document.getElementById("blabel-" + batchIdx);
+                var pDone = data.pages_done || 0;
+                var pTotal = data.pages_total || 0;
+                if (fileFill) fileFill.style.width = (pTotal > 0 ? Math.round(pDone / pTotal * 100) : 0) + "%";
+                if (fileLabel) fileLabel.textContent = pTotal > 0 ? pDone + "/" + pTotal + " pages" : (data.stage_detail || "");
+
+                // Per-file markdown output (all tabs)
+                if (data.markdown) {
+                    setBatchMarkdown(batchIdx, data.markdown, data.task_id, data.filename);
+                }
+
+                // Aggregate global progress bars
+                updateBatchTotalProgress();
             } else {
                 updatePipeline(data);
                 updateProgress(data);
@@ -763,7 +1064,8 @@
             var stageKey = data.stage + ":" + data.status;
             if (stageKey !== _lastLoggedStage || stats) {
                 _lastLoggedStage = stageKey;
-                log("[" + data.stage + "] " + detail + stats);
+                var fileTag = data.filename ? "[" + data.filename + "] " : "";
+                log(fileTag + "[" + data.stage + "] " + detail + stats);
             }
         }
 
@@ -775,11 +1077,39 @@
                     updateBatchPipeline(batchIdx, data);
                     setBatchStatus(batchIdx, "done", "done");
                     log("[" + taskId + "] Complete");
+                    // Fill per-file bar to 100%
+                    var fileFill = document.getElementById("bfill-" + batchIdx);
+                    if (fileFill) fileFill.style.width = "100%";
+                    // Fetch full result + region data for boxes
+                    (function (bi, tid) {
+                        var fn = batchTasks[bi] ? batchTasks[bi].filename : "";
+                        fetch("/api/result/" + tid)
+                            .then(function (r) { return r.json(); })
+                            .then(function (result) {
+                                if (result.markdown) setBatchMarkdown(bi, result.markdown, tid, fn);
+                            }).catch(function () {});
+                        // Load region data for bbox overlay
+                        fetch("/api/regions/" + tid)
+                            .then(function (r) { return r.json(); })
+                            .then(function (data) {
+                                if (data.regions && data.regions.length) {
+                                    if (!currentPageRegions._batch) currentPageRegions._batch = {};
+                                    currentPageRegions._batch[bi] = {};
+                                    for (var p = 0; p < data.regions.length; p++) {
+                                        currentPageRegions._batch[bi][p] = (data.regions[p] || []).map(function (r, i) {
+                                            return { bbox_2d: r.bbox_2d, label: r.label || r.task_type, content: r.content };
+                                        });
+                                    }
+                                    drawBatchRegions(bi);
+                                }
+                            }).catch(function () {});
+                    })(batchIdx, taskId);
                 } else {
                     setBatchStatus(batchIdx, data.error || "error", "error");
                     log("[" + taskId + "] Error: " + (data.error || "unknown"), "error");
                 }
                 batchResults[batchIdx] = { taskId: taskId, status: data.status };
+                updateBatchTotalProgress();
                 batchCheckDone();
             } else {
                 stopMainServerLogPoll();
@@ -906,6 +1236,57 @@
         }
         if (regionStatsEl) {
             regionStatsEl.textContent = data.regions_breakdown || "";
+        }
+    }
+
+    function updateBatchTotalProgress() {
+        var totalPages = 0, donePages = 0;
+        var totalRegions = 0, doneRegions = 0;
+        var breakdownParts = {};
+        var filesDone = 0;
+
+        for (var k in batchProgress) {
+            var p = batchProgress[k];
+            totalPages += p.pages_total;
+            donePages += p.pages_done;
+            totalRegions += p.regions_total;
+            doneRegions += p.regions_done;
+            if (p.regions_breakdown) {
+                p.regions_breakdown.split(" ").forEach(function (part) {
+                    var kv = part.split(":");
+                    if (kv.length === 2) {
+                        breakdownParts[kv[0]] = (breakdownParts[kv[0]] || 0) + parseInt(kv[1], 10);
+                    }
+                });
+            }
+        }
+        for (var k in batchResults) {
+            if (batchResults[k].status === "done") filesDone++;
+        }
+
+        // Pages bar — show files done / total + pages
+        var pageFill = document.getElementById("progress-fill");
+        var pageLabel = document.getElementById("progress-text");
+        var pagePct = totalPages > 0 ? Math.round(donePages / totalPages * 100) : 0;
+        if (pageFill) pageFill.style.width = pagePct + "%";
+        if (pageLabel) {
+            pageLabel.textContent = filesDone + "/" + batchTotal + " files"
+                + (totalPages > 0 ? "  (" + donePages + "/" + totalPages + " pages)" : "");
+        }
+
+        // Regions bar
+        var regionFill = document.getElementById("region-progress-fill");
+        var regionLabel = document.getElementById("region-progress-text");
+        var regionStats = document.getElementById("region-progress-stats");
+        var regionPct = totalRegions > 0 ? Math.round(doneRegions / totalRegions * 100) : 0;
+        if (regionFill) regionFill.style.width = regionPct + "%";
+        if (regionLabel) regionLabel.textContent = totalRegions > 0 ? doneRegions + "/" + totalRegions + " regions" : "";
+        if (regionStats) {
+            var parts = [];
+            ["text", "table", "formula", "skip"].forEach(function (lbl) {
+                if (breakdownParts[lbl]) parts.push(lbl + ":" + breakdownParts[lbl]);
+            });
+            regionStats.textContent = parts.join(" ");
         }
     }
 
@@ -1813,5 +2194,106 @@
         });
     }
     applyLayout(layoutMode);
+
+    // ── Reconnect to active tasks on page load ─────────
+    // When navigating back from Settings, restore running pipelines.
+    (function reconnectActiveTasks() {
+        if (!document.getElementById("pipeline-section")) return; // not pipeline page
+        fetch("/api/tasks")
+            .then(function (r) { return r.json(); })
+            .then(function (taskList) {
+                if (!taskList || !taskList.length) return;
+
+                // Filter to non-idle tasks
+                var active = taskList.filter(function (t) {
+                    return t.status !== "pending" || t.stage !== "idle";
+                });
+                if (!active.length) return;
+
+                // Single task: reconnect directly
+                if (active.length === 1) {
+                    var t = active[0];
+                    if (pipelineSection) pipelineSection.classList.remove("hidden");
+                    if (logSection) logSection.classList.remove("hidden");
+                    if (uploadStatus) uploadStatus.textContent = "Resuming: " + t.filename;
+
+                    // Show PDF preview from server
+                    if (outputSection) outputSection.classList.remove("hidden");
+                    showPdfPreview(t.filename);
+
+                    if (t.status === "done") {
+                        // Already done — fetch result directly
+                        fetchResult(t.task_id);
+                    } else if (t.status === "error") {
+                        if (uploadStatus) uploadStatus.textContent = "Error on " + t.filename;
+                    } else {
+                        // Still running — reconnect SSE
+                        connectSSE(t.task_id, null);
+                    }
+                    return;
+                }
+
+                // Multiple tasks: reconnect as batch
+                if (pipelineSection) pipelineSection.classList.remove("hidden");
+                if (logSection) logSection.classList.remove("hidden");
+                var batchSection = document.getElementById("batch-section");
+                if (batchSection) batchSection.classList.remove("hidden");
+
+                batchTotal = active.length;
+                batchDone = 0;
+                if (uploadStatus) uploadStatus.textContent = "Resuming " + active.length + " files...";
+
+                var list = document.getElementById("batch-list");
+                if (list) list.innerHTML = "";
+
+                active.forEach(function (t, idx) {
+                    batchTasks[idx] = { taskId: t.task_id, filename: t.filename };
+
+                    // Build minimal batch item
+                    var details = document.createElement("details");
+                    details.className = "batch-item";
+                    details.id = "batch-item-" + idx;
+                    details.open = true;
+
+                    var summary = document.createElement("summary");
+                    summary.innerHTML =
+                        '<span class="batch-filename">' + escapeHtml(t.filename) + '</span>' +
+                        '<span class="batch-stages">' +
+                            STAGE_NAMES.map(function (n, j) {
+                                return '<span class="batch-stage" id="bs-' + idx + '-' + j + '">' + n + '</span>';
+                            }).join("") +
+                        '</span>' +
+                        '<span class="batch-status" id="bstat-' + idx + '">' + t.status + '</span>';
+                    details.appendChild(summary);
+
+                    var barWrap = document.createElement("div");
+                    barWrap.className = "batch-progress-bar";
+                    barWrap.innerHTML =
+                        '<div class="progress-bar-track"><div class="batch-fill" id="bfill-' + idx + '"></div></div>' +
+                        '<span class="batch-progress-label" id="blabel-' + idx + '"></span>';
+                    details.appendChild(barWrap);
+
+                    if (list) list.appendChild(details);
+
+                    if (t.status === "done") {
+                        setBatchStatus(idx, "done", "done");
+                        var ff = document.getElementById("bfill-" + idx);
+                        if (ff) ff.style.width = "100%";
+                        batchDone++;
+                    } else if (t.status === "error") {
+                        setBatchStatus(idx, "error", "error");
+                        batchDone++;
+                    } else {
+                        setBatchStatus(idx, "processing", "running");
+                        connectSSE(t.task_id, idx);
+                    }
+                });
+
+                if (batchDone >= batchTotal) {
+                    if (uploadStatus) uploadStatus.textContent = "Batch complete (" + batchTotal + " files)";
+                }
+            })
+            .catch(function () {});
+    })();
 
 })();

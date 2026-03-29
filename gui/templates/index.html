@@ -135,5 +135,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v={{ cache_bust | default('1') }}"></script>
 {% endblock %}

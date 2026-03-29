@@ -377,6 +377,59 @@ details.batch-item[open] summary::before {
 .batch-item .batch-status.error { color: var(--accent-red); }
 .batch-item .batch-status.running { color: var(--accent-cyan); }
 
+.batch-item.batch-active > summary {
+    background: rgba(0, 204, 204, 0.08);
+    border-left: 3px solid var(--accent-cyan);
+}
+
+.batch-progress-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 14px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-secondary);
+}
+
+.batch-progress-bar .progress-bar-track {
+    flex: 1;
+    height: 4px;
+}
+
+.batch-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--accent-cyan);
+    border-radius: 2px;
+    transition: width 0.3s ease;
+}
+
+.batch-progress-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    min-width: 80px;
+    text-align: right;
+}
+
+.batch-comparison {
+    border-top: 1px solid var(--border);
+}
+
+.batch-comparison .pdf-preview-container {
+    height: 500px;
+}
+
+.batch-comparison .pdf-canvas-wrap {
+    min-height: 400px;
+}
+
+.batch-comparison .md-preview,
+.batch-comparison .output-preview {
+    max-height: 460px;
+    overflow-y: auto;
+}
+
 .batch-preview {
     max-height: 300px;
     overflow-y: auto;

@@ -143,8 +143,12 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         autoescape=True,
     )
 
+    import time as _time
+    _cache_bust = str(int(_time.time()))
+
     def _render(template_name: str, **ctx) -> HTMLResponse:
         tmpl = _jinja_env.get_template(template_name)
+        ctx.setdefault("cache_bust", _cache_bust)
         return HTMLResponse(tmpl.render(**ctx))
 
     # --- Page routes ------------------------------------------------------------
@@ -239,6 +243,19 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         asyncio.create_task(worker.run(state))
 
         return JSONResponse({"task_id": task_id, "filename": file.filename})
+
+    @app.get("/api/tasks")
+    async def list_tasks():
+        """Return all known tasks (active + recent) for reconnection."""
+        result = []
+        for tid, state in tasks.items():
+            result.append({
+                "task_id": tid,
+                "filename": state.filename,
+                "status": state.status,
+                "stage": state.stage,
+            })
+        return JSONResponse(result)
 
     @app.get("/api/progress/{task_id}")
     async def progress(task_id: str):
