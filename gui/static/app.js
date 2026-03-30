@@ -2593,7 +2593,14 @@
             });
         } else if (type === "markdown") {
             fetch(url).then(function (r) { return r.text(); }).then(function (t) {
-                body.innerHTML = '<div class="fe-md-preview">' + (typeof marked !== "undefined" ? marked.parse(t) : '<pre>' + escapeHtml(t) + '</pre>') + '</div>';
+                var html = typeof marked !== "undefined" ? marked.parse(t) : '<pre>' + escapeHtml(t) + '</pre>';
+                // Rewrite image paths: imgs/... → /api/files/{stem}/imgs/...
+                var stemMatch = url.match(/\/api\/files\/([^/]+)\//);
+                if (stemMatch) {
+                    html = html.replace(/src="(imgs\/[^"]+)"/g, 'src="/api/files/' + stemMatch[1] + '/imgs/$1"');
+                    html = html.replace(/src="imgs\//g, 'src="/api/files/' + stemMatch[1] + '/imgs/');
+                }
+                body.innerHTML = '<div class="fe-md-preview">' + html + '</div>';
             });
         } else if (type === "image") {
             body.innerHTML = '<img src="' + url + '" class="fe-img-preview">';
