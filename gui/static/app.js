@@ -2595,10 +2595,19 @@
                         '<div class="pdf-overlay" id="fe-cv-overlay"></div>' +
                     '</div>' +
                 '</div>' +
-                // Right: Markdown with region blocks
+                // Right: Output with tabs (Preview / Raw / Full MD)
                 '<div class="fe-compare-right">' +
-                    '<div class="fe-compare-panel-label">Output</div>' +
+                    '<div class="fe-compare-panel-label">' +
+                        '<span>Output</span>' +
+                        '<span class="fe-cv-tabs">' +
+                            '<button class="tab active" id="fe-cv-tab-preview" data-tab="preview">Preview</button>' +
+                            '<button class="tab" id="fe-cv-tab-raw" data-tab="raw">Raw</button>' +
+                            '<button class="tab" id="fe-cv-tab-fullmd" data-tab="fullmd">Full MD</button>' +
+                        '</span>' +
+                    '</div>' +
                     '<div class="fe-cv-md" id="fe-cv-md">Loading...</div>' +
+                    '<div class="fe-cv-raw hidden" id="fe-cv-raw"><pre id="fe-cv-rawpre"></pre></div>' +
+                    '<div class="fe-cv-fullmd hidden" id="fe-cv-fullmd"><pre id="fe-cv-fullpre"></pre></div>' +
                 '</div>' +
             '</div>';
 
@@ -2616,8 +2625,21 @@
             cvRender();
         });
 
+        // Tab switching
+        ["preview", "raw", "fullmd"].forEach(function (tab) {
+            var btn = document.getElementById("fe-cv-tab-" + tab);
+            if (btn) btn.addEventListener("click", function () {
+                modal.querySelectorAll(".fe-cv-tabs .tab").forEach(function (t) { t.classList.remove("active"); });
+                btn.classList.add("active");
+                ["preview", "raw", "fullmd"].forEach(function (t) {
+                    var panel = document.getElementById("fe-cv-" + (t === "preview" ? "md" : t));
+                    if (panel) panel.classList.toggle("hidden", t !== tab);
+                });
+            });
+        });
+
         // PDF state
-        var cvState = { doc: null, page: 1, total: 0, zoom: 1.0, regions: null };
+        var cvState = { doc: null, page: 1, total: 0, zoom: 1.0, regions: null, rawMd: "" };
         var canvas = document.getElementById("fe-cv-canvas");
         var wrap = document.getElementById("fe-cv-wrap");
         var overlay = document.getElementById("fe-cv-overlay");
@@ -2772,7 +2794,7 @@
             });
         }
 
-        // Load JSON regions + build markdown
+        // Load JSON regions + build preview markdown
         var jsonFile = folder.files.find(function (f) { return f.name.endsWith(".json"); });
         if (jsonFile) {
             fetch("/api/files/" + encodeURIComponent(stem) + "/" + encodeURIComponent(jsonFile.name))
@@ -2781,6 +2803,20 @@
                     cvState.regions = regions;
                     cvDrawBoxes();
                     cvBuildMd(regions);
+                });
+        }
+
+        // Load raw .md for Raw + Full MD tabs
+        var mdFile = folder.files.find(function (f) { return f.name.endsWith(".md"); });
+        if (mdFile) {
+            fetch("/api/files/" + encodeURIComponent(stem) + "/" + encodeURIComponent(mdFile.name))
+                .then(function (r) { return r.text(); })
+                .then(function (md) {
+                    cvState.rawMd = md;
+                    var rawPre = document.getElementById("fe-cv-rawpre");
+                    if (rawPre) rawPre.textContent = md;
+                    var fullPre = document.getElementById("fe-cv-fullpre");
+                    if (fullPre) fullPre.textContent = md;
                 });
         }
     }
