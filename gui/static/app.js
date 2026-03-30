@@ -2568,7 +2568,11 @@
                     folderCheckboxes.push(cb);
                     summary.appendChild(cb);
 
-                    summary.innerHTML += '<span class="fe-icon">\uD83D\uDCC1</span> ' + escapeHtml(folder.name);
+                    var iconSpan = document.createElement("span");
+                    iconSpan.className = "fe-icon";
+                    iconSpan.textContent = "\uD83D\uDCC1";
+                    summary.appendChild(iconSpan);
+                    summary.appendChild(document.createTextNode(" " + folder.name));
                     var zipBtn = document.createElement("a");
                     zipBtn.href = "/api/files/" + encodeURIComponent(folder.name) + "/zip";
                     zipBtn.className = "fe-zip-btn";
