@@ -2458,4 +2458,150 @@
             .catch(function () {});
     })();
 
+    // ── Hamburger Menu ───────────────────────────────
+    var hamburgerBtn = document.getElementById("hamburger-btn");
+    var navLinksEl = document.getElementById("nav-links");
+    if (hamburgerBtn && navLinksEl) {
+        hamburgerBtn.addEventListener("click", function () {
+            navLinksEl.classList.toggle("open");
+            hamburgerBtn.classList.toggle("active");
+        });
+        navLinksEl.querySelectorAll("a").forEach(function (a) {
+            a.addEventListener("click", function () {
+                navLinksEl.classList.remove("open");
+                hamburgerBtn.classList.remove("active");
+            });
+        });
+    }
+
+    // ── File Explorer ────────────────────────────────
+    var fileTree = document.getElementById("file-tree");
+    if (fileTree) {
+        fetch("/api/files")
+            .then(function (r) { return r.json(); })
+            .then(function (folders) {
+                if (!folders.length) { fileTree.textContent = "No processed files yet."; return; }
+                fileTree.innerHTML = "";
+                folders.forEach(function (folder) {
+                    var item = document.createElement("details");
+                    item.className = "fe-folder";
+                    var summary = document.createElement("summary");
+                    summary.className = "fe-folder-name";
+                    summary.innerHTML = '<span class="fe-icon">\uD83D\uDCC1</span> ' + escapeHtml(folder.name);
+                    var zipBtn = document.createElement("a");
+                    zipBtn.href = "/api/files/" + encodeURIComponent(folder.name) + "/zip";
+                    zipBtn.className = "fe-zip-btn";
+                    zipBtn.textContent = "\u2193 ZIP";
+                    zipBtn.title = "Download all as ZIP";
+                    zipBtn.addEventListener("click", function (e) { e.stopPropagation(); });
+                    summary.appendChild(zipBtn);
+                    item.appendChild(summary);
+
+                    var content = document.createElement("div");
+                    content.className = "fe-content";
+
+                    if (folder.input_file) {
+                        var sec = document.createElement("div");
+                        sec.className = "fe-section";
+                        sec.innerHTML = '<div class="fe-section-label">Input</div>';
+                        sec.appendChild(_feFileItem(folder.name, "../uploads/" + folder.input_file, folder.input_file, "input"));
+                        content.appendChild(sec);
+                    }
+                    if (folder.files.length) {
+                        var sec2 = document.createElement("div");
+                        sec2.className = "fe-section";
+                        sec2.innerHTML = '<div class="fe-section-label">Output</div>';
+                        folder.files.forEach(function (f) {
+                            sec2.appendChild(_feFileItem(folder.name, f.name, f.name, _feType(f.name), f.size));
+                        });
+                        content.appendChild(sec2);
+                    }
+                    if (folder.has_images && folder.images && folder.images.length) {
+                        var sec3 = document.createElement("div");
+                        sec3.className = "fe-section";
+                        sec3.innerHTML = '<div class="fe-section-label">Extracted Images (' + folder.images.length + ')</div>';
+                        var grid = document.createElement("div");
+                        grid.className = "fe-img-grid";
+                        folder.images.forEach(function (img) {
+                            var thumb = document.createElement("div");
+                            thumb.className = "fe-thumb";
+                            var imgUrl = "/api/files/" + encodeURIComponent(folder.name) + "/imgs/" + encodeURIComponent(img);
+                            thumb.innerHTML =
+                                '<img src="' + imgUrl + '" loading="lazy">' +
+                                '<div class="fe-thumb-name">' + escapeHtml(img) + '</div>' +
+                                '<a href="' + imgUrl + '" download class="fe-dl-btn">\u2193</a>';
+                            grid.appendChild(thumb);
+                        });
+                        sec3.appendChild(grid);
+                        content.appendChild(sec3);
+                    }
+                    item.appendChild(content);
+                    fileTree.appendChild(item);
+                });
+            })
+            .catch(function () { fileTree.textContent = "Failed to load files."; });
+    }
+
+    function _feType(name) {
+        if (name.endsWith(".json")) return "json";
+        if (name.endsWith(".md")) return "markdown";
+        if (/\.(png|jpg|jpeg|webp|bmp|tiff?)$/i.test(name)) return "image";
+        if (name.endsWith(".pdf")) return "pdf";
+        return "file";
+    }
+
+    function _feFileItem(stem, path, displayName, type, size) {
+        var row = document.createElement("div");
+        row.className = "fe-file";
+        var icons = { json: "\uD83D\uDCC4", markdown: "\uD83D\uDCDD", image: "\uD83D\uDDBC\uFE0F", pdf: "\uD83D\uDCD5", input: "\uD83D\uDCD5" };
+        var icon = icons[type] || "\uD83D\uDCCE";
+        var sizeStr = size ? " (" + _feFmtSize(size) + ")" : "";
+        var fileUrl = "/api/files/" + encodeURIComponent(stem) + "/" + encodeURIComponent(path);
+        row.innerHTML =
+            '<span class="fe-file-icon">' + icon + '</span>' +
+            '<span class="fe-file-name">' + escapeHtml(displayName) + sizeStr + '</span>' +
+            '<button class="fe-preview-btn">Preview</button>' +
+            '<a href="' + fileUrl + '" download class="fe-dl-btn">\u2193</a>';
+        row.querySelector(".fe-preview-btn").addEventListener("click", function () {
+            _feShowPreview(fileUrl, type, displayName);
+        });
+        return row;
+    }
+
+    function _feFmtSize(b) {
+        if (b < 1024) return b + " B";
+        if (b < 1048576) return (b / 1024).toFixed(1) + " KB";
+        return (b / 1048576).toFixed(1) + " MB";
+    }
+
+    function _feShowPreview(url, type, name) {
+        var old = document.getElementById("fe-modal");
+        if (old) old.remove();
+        var modal = document.createElement("div");
+        modal.id = "fe-modal";
+        modal.className = "fe-modal";
+        modal.innerHTML =
+            '<div class="fe-modal-header"><span>' + escapeHtml(name) + '</span><button class="fe-modal-close">&times;</button></div>' +
+            '<div class="fe-modal-body" id="fe-modal-body">Loading...</div>';
+        document.body.appendChild(modal);
+        modal.querySelector(".fe-modal-close").addEventListener("click", function () { modal.remove(); });
+        modal.addEventListener("click", function (e) { if (e.target === modal) modal.remove(); });
+        var body = document.getElementById("fe-modal-body");
+        if (type === "json") {
+            fetch(url).then(function (r) { return r.json(); }).then(function (d) {
+                body.innerHTML = '<pre class="fe-json-preview">' + escapeHtml(JSON.stringify(d, null, 2)) + '</pre>';
+            });
+        } else if (type === "markdown") {
+            fetch(url).then(function (r) { return r.text(); }).then(function (t) {
+                body.innerHTML = '<div class="fe-md-preview">' + (typeof marked !== "undefined" ? marked.parse(t) : '<pre>' + escapeHtml(t) + '</pre>') + '</div>';
+            });
+        } else if (type === "image") {
+            body.innerHTML = '<img src="' + url + '" class="fe-img-preview">';
+        } else if (type === "pdf" || type === "input") {
+            body.innerHTML = '<embed src="' + url + '" type="application/pdf" class="fe-pdf-preview">';
+        } else {
+            body.innerHTML = '<p>No preview. <a href="' + url + '" download>Download</a></p>';
+        }
+    }
+
 })();

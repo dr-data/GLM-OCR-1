@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Files – GLM-OCR{% endblock %}
+
+{% block content %}
+<h2>File Explorer</h2>
+<div id="file-explorer">
+    <div id="file-tree" class="file-tree">Loading...</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/app.js?v={{ cache_bust | default('1') }}"></script>
+{% endblock %}

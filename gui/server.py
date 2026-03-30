@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import io
 import json
 import os
 import platform
@@ -13,14 +14,16 @@ import subprocess
 import sys
 import threading
 import uuid
+import zipfile
 from pathlib import Path
 from typing import Optional
 
 import jinja2
 from fastapi import FastAPI, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
+from starlette.responses import StreamingResponse
 
 # Ensure project root is importable.
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
@@ -165,9 +168,11 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
             config_path=str(config.config_path),
         )
 
-    # --- OCR output image serving -----------------------------------------------
-    from fastapi.responses import FileResponse
+    @app.get("/files")
+    async def files_page():
+        return _render("files.html", config_path=str(config.config_path))
 
+    # --- OCR output image serving -----------------------------------------------
     @app.get("/api/uploaded/{filename:path}")
     async def serve_uploaded(filename: str):
         """Serve uploaded files (PDFs/images) for preview."""
@@ -841,5 +846,71 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
                 "port": default_port,
                 "message": f"Failed to start {meta['label']}: {e}",
             })
+
+    # ── File Explorer API ────────────────────────────
+
+    @app.get("/api/files")
+    async def list_files():
+        output_dir = Path(config.get_tui_setting("output_dir", "./output"))
+        uploads_dir = output_dir / "uploads"
+        result = []
+        if not output_dir.exists():
+            return JSONResponse(result)
+        for d in sorted(output_dir.iterdir()):
+            if not d.is_dir() or d.name == "uploads":
+                continue
+            entry: dict = {"name": d.name, "files": [], "has_images": False}
+            for ext in (".pdf", ".png", ".jpg", ".jpeg", ".doc", ".docx",
+                        ".tif", ".tiff", ".bmp", ".webp"):
+                candidate = uploads_dir / (d.name + ext)
+                if candidate.exists():
+                    entry["input_file"] = candidate.name
+                    break
+            for f in sorted(d.iterdir()):
+                if f.is_file() and not f.name.endswith("_model.json"):
+                    entry["files"].append({"name": f.name, "size": f.stat().st_size})
+                elif f.is_dir() and f.name == "imgs":
+                    entry["has_images"] = True
+                    entry["images"] = [
+                        img.name for img in sorted(f.iterdir()) if img.is_file()
+                    ]
+            result.append(entry)
+        return JSONResponse(result)
+
+    @app.get("/api/files/{stem}/zip")
+    async def download_zip(stem: str):
+        output_dir = Path(config.get_tui_setting("output_dir", "./output"))
+        folder = output_dir / stem
+        if not folder.exists() or not folder.is_dir():
+            return JSONResponse({"error": "Not found"}, status_code=404)
+        uploads_dir = output_dir / "uploads"
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for f in folder.rglob("*"):
+                if f.is_file() and not f.name.endswith("_model.json"):
+                    zf.write(f, f"{stem}/{f.relative_to(folder)}")
+            for ext in (".pdf", ".png", ".jpg", ".jpeg", ".doc", ".docx"):
+                candidate = uploads_dir / (stem + ext)
+                if candidate.exists():
+                    zf.write(candidate, f"{stem}/input/{candidate.name}")
+                    break
+        buf.seek(0)
+        return StreamingResponse(
+            buf,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{stem}.zip"'},
+        )
+
+    @app.get("/api/files/{stem}/{path:path}")
+    async def get_explorer_file(stem: str, path: str):
+        output_dir = Path(config.get_tui_setting("output_dir", "./output"))
+        file_path = output_dir / stem / path
+        if not file_path.exists() or not file_path.is_file():
+            return JSONResponse({"error": "Not found"}, status_code=404)
+        try:
+            file_path.resolve().relative_to(output_dir.resolve())
+        except ValueError:
+            return JSONResponse({"error": "Invalid path"}, status_code=403)
+        return FileResponse(file_path)
 
     return app
