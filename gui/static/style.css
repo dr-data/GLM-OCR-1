@@ -1239,6 +1239,18 @@ footer {
 /* ── File Explorer ──────────────────────── */
 .file-tree { max-width: 900px; margin: 0 auto; }
 
+/* Bulk action toolbar */
+.fe-toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-bottom: 10px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); flex-wrap: wrap; }
+.fe-select-all-label { font-size: 12px; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; gap: 4px; }
+.fe-bulk-btn { padding: 3px 12px; font-size: 11px; background: transparent; border: 1px solid var(--border); color: var(--text-muted); border-radius: var(--radius); cursor: pointer; }
+.fe-bulk-btn:hover:not(:disabled) { color: var(--accent-cyan); border-color: var(--accent-cyan); }
+.fe-bulk-btn:disabled { opacity: 0.4; cursor: default; }
+.fe-bulk-delete:hover:not(:disabled) { color: var(--accent-red); border-color: var(--accent-red); }
+.fe-bulk-download:hover:not(:disabled) { color: var(--accent-green); border-color: var(--accent-green); }
+.fe-bulk-count { font-size: 12px; color: var(--accent-cyan); margin-left: auto; }
+
+.fe-folder-cb { margin-right: 4px; cursor: pointer; }
+
 .fe-folder { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 8px; }
 .fe-folder-name { padding: 10px 14px; cursor: pointer; font-weight: bold; display: flex; align-items: center; gap: 8px; }
 .fe-folder-name:hover { background: var(--bg-secondary); }

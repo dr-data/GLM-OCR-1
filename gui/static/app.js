@@ -2482,12 +2482,93 @@
             .then(function (folders) {
                 if (!folders.length) { fileTree.textContent = "No processed files yet."; return; }
                 fileTree.innerHTML = "";
+
+                // Bulk action toolbar
+                var toolbar = document.createElement("div");
+                toolbar.className = "fe-toolbar";
+                toolbar.innerHTML =
+                    '<label class="fe-select-all-label"><input type="checkbox" id="fe-select-all"> Select All</label>' +
+                    '<button class="fe-bulk-btn" id="fe-bulk-deselect" disabled>Deselect</button>' +
+                    '<button class="fe-bulk-btn fe-bulk-download" id="fe-bulk-download" disabled>\u2193 Download Selected</button>' +
+                    '<button class="fe-bulk-btn fe-bulk-delete" id="fe-bulk-delete" disabled>\u2717 Delete Selected</button>' +
+                    '<span class="fe-bulk-count" id="fe-bulk-count"></span>';
+                fileTree.appendChild(toolbar);
+
+                var folderCheckboxes = [];
+
+                function updateBulkState() {
+                    var checked = folderCheckboxes.filter(function (c) { return c.checked; });
+                    var count = checked.length;
+                    document.getElementById("fe-bulk-count").textContent = count > 0 ? count + " selected" : "";
+                    document.getElementById("fe-bulk-download").disabled = count === 0;
+                    document.getElementById("fe-bulk-delete").disabled = count === 0;
+                    document.getElementById("fe-bulk-deselect").disabled = count === 0;
+                    document.getElementById("fe-select-all").checked = count === folders.length && count > 0;
+                }
+
+                document.getElementById("fe-select-all").addEventListener("change", function () {
+                    var val = this.checked;
+                    folderCheckboxes.forEach(function (cb) { cb.checked = val; });
+                    updateBulkState();
+                });
+
+                document.getElementById("fe-bulk-deselect").addEventListener("click", function () {
+                    folderCheckboxes.forEach(function (cb) { cb.checked = false; });
+                    updateBulkState();
+                });
+
+                document.getElementById("fe-bulk-download").addEventListener("click", function () {
+                    var selected = folderCheckboxes.filter(function (c) { return c.checked; });
+                    if (selected.length === 1) {
+                        window.location.href = "/api/files/" + encodeURIComponent(selected[0].value) + "/zip";
+                    } else if (selected.length > 1) {
+                        var names = selected.map(function (c) { return c.value; });
+                        window.location.href = "/api/files/bulk-zip?stems=" + encodeURIComponent(names.join(","));
+                    }
+                });
+
+                document.getElementById("fe-bulk-delete").addEventListener("click", function () {
+                    var selected = folderCheckboxes.filter(function (c) { return c.checked; });
+                    var names = selected.map(function (c) { return c.value; });
+                    if (!names.length) return;
+                    if (!confirm("Delete " + names.length + " folder(s)?\n\n" + names.join("\n") + "\n\nThis cannot be undone.")) return;
+                    fetch("/api/files/bulk-delete", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ stems: names }),
+                    })
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        if (data.deleted) {
+                            // Remove deleted items from DOM
+                            data.deleted.forEach(function (stem) {
+                                var el = document.getElementById("fe-folder-" + stem);
+                                if (el) el.remove();
+                            });
+                            folderCheckboxes = folderCheckboxes.filter(function (c) { return !data.deleted.includes(c.value); });
+                            updateBulkState();
+                        }
+                    });
+                });
+
                 folders.forEach(function (folder) {
                     var item = document.createElement("details");
                     item.className = "fe-folder";
+                    item.id = "fe-folder-" + folder.name;
                     var summary = document.createElement("summary");
                     summary.className = "fe-folder-name";
-                    summary.innerHTML = '<span class="fe-icon">\uD83D\uDCC1</span> ' + escapeHtml(folder.name);
+
+                    // Checkbox for selection
+                    var cb = document.createElement("input");
+                    cb.type = "checkbox";
+                    cb.className = "fe-folder-cb";
+                    cb.value = folder.name;
+                    cb.addEventListener("change", updateBulkState);
+                    cb.addEventListener("click", function (e) { e.stopPropagation(); });
+                    folderCheckboxes.push(cb);
+                    summary.appendChild(cb);
+
+                    summary.innerHTML += '<span class="fe-icon">\uD83D\uDCC1</span> ' + escapeHtml(folder.name);
                     var zipBtn = document.createElement("a");
                     zipBtn.href = "/api/files/" + encodeURIComponent(folder.name) + "/zip";
                     zipBtn.className = "fe-zip-btn";

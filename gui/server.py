@@ -877,6 +877,58 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
             result.append(entry)
         return JSONResponse(result)
 
+    @app.post("/api/files/bulk-delete")
+    async def bulk_delete(request: Request):
+        body = await request.json()
+        stems = body.get("stems", [])
+        output_dir = Path(config.get_tui_setting("output_dir", "./output"))
+        uploads_dir = output_dir / "uploads"
+        deleted = []
+        for stem in stems:
+            folder = output_dir / stem
+            if folder.exists() and folder.is_dir():
+                # Security check
+                try:
+                    folder.resolve().relative_to(output_dir.resolve())
+                except ValueError:
+                    continue
+                shutil.rmtree(folder)
+                deleted.append(stem)
+                # Also delete matching upload
+                for ext in (".pdf", ".png", ".jpg", ".jpeg", ".doc", ".docx",
+                            ".tif", ".tiff", ".bmp", ".webp"):
+                    candidate = uploads_dir / (stem + ext)
+                    if candidate.exists():
+                        candidate.unlink()
+                        break
+        return JSONResponse({"deleted": deleted})
+
+    @app.get("/api/files/bulk-zip")
+    async def bulk_zip(stems: str = ""):
+        stem_list = [s.strip() for s in stems.split(",") if s.strip()]
+        output_dir = Path(config.get_tui_setting("output_dir", "./output"))
+        uploads_dir = output_dir / "uploads"
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for stem in stem_list:
+                folder = output_dir / stem
+                if not folder.exists() or not folder.is_dir():
+                    continue
+                for f in folder.rglob("*"):
+                    if f.is_file() and not f.name.endswith("_model.json"):
+                        zf.write(f, f"{stem}/{f.relative_to(folder)}")
+                for ext in (".pdf", ".png", ".jpg", ".jpeg", ".doc", ".docx"):
+                    candidate = uploads_dir / (stem + ext)
+                    if candidate.exists():
+                        zf.write(candidate, f"{stem}/input/{candidate.name}")
+                        break
+        buf.seek(0)
+        return StreamingResponse(
+            buf,
+            media_type="application/zip",
+            headers={"Content-Disposition": 'attachment; filename="glmocr-batch.zip"'},
+        )
+
     @app.get("/api/files/{stem}/zip")
     async def download_zip(stem: str):
         output_dir = Path(config.get_tui_setting("output_dir", "./output"))
