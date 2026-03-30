@@ -2495,6 +2495,23 @@
                     zipBtn.title = "Download all as ZIP";
                     zipBtn.addEventListener("click", function (e) { e.stopPropagation(); });
                     summary.appendChild(zipBtn);
+
+                    // "Compare" button — opens pipeline-style side-by-side view
+                    if (folder.input_file) {
+                        var compareBtn = document.createElement("button");
+                        compareBtn.className = "fe-compare-btn";
+                        compareBtn.textContent = "Compare";
+                        compareBtn.title = "Side-by-side PDF + Markdown with box references";
+                        (function (f) {
+                            compareBtn.addEventListener("click", function (e) {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                _feOpenCompareView(f);
+                            });
+                        })(folder);
+                        summary.appendChild(compareBtn);
+                    }
+
                     item.appendChild(summary);
 
                     var content = document.createElement("div");
@@ -2540,6 +2557,221 @@
                 });
             })
             .catch(function () { fileTree.textContent = "Failed to load files."; });
+    }
+
+    // ── Compare View (pipeline-style side-by-side) ──
+    function _feOpenCompareView(folder) {
+        var old = document.getElementById("fe-modal");
+        if (old) old.remove();
+
+        var stem = folder.name;
+        var modal = document.createElement("div");
+        modal.id = "fe-modal";
+        modal.className = "fe-modal fe-compare-modal";
+
+        modal.innerHTML =
+            '<div class="fe-modal-header">' +
+                '<span>' + escapeHtml(stem) + ' — Compare</span>' +
+                '<div>' +
+                    '<button class="fe-layout-toggle" id="fe-layout-toggle">\u2B0C Side-by-side</button>' +
+                    '<button class="fe-modal-close">&times;</button>' +
+                '</div>' +
+            '</div>' +
+            '<div class="fe-compare-body" id="fe-compare-body">' +
+                // Left: PDF with controls
+                '<div class="fe-compare-left">' +
+                    '<div class="fe-compare-panel-label">Input</div>' +
+                    '<div class="fe-cv-controls">' +
+                        '<button id="fe-cv-prev">&laquo;</button>' +
+                        '<span id="fe-cv-page">- / -</span>' +
+                        '<button id="fe-cv-next">&raquo;</button>' +
+                        '<span class="pdf-controls-sep">|</span>' +
+                        '<button id="fe-cv-zout">-</button>' +
+                        '<span id="fe-cv-zoom">100%</span>' +
+                        '<button id="fe-cv-zin">+</button>' +
+                    '</div>' +
+                    '<div class="fe-cv-canvas-wrap" id="fe-cv-wrap">' +
+                        '<canvas id="fe-cv-canvas"></canvas>' +
+                        '<div class="pdf-overlay" id="fe-cv-overlay"></div>' +
+                    '</div>' +
+                '</div>' +
+                // Right: Markdown with region blocks
+                '<div class="fe-compare-right">' +
+                    '<div class="fe-compare-panel-label">Output</div>' +
+                    '<div class="fe-cv-md" id="fe-cv-md">Loading...</div>' +
+                '</div>' +
+            '</div>';
+
+        document.body.appendChild(modal);
+        modal.querySelector(".fe-modal-close").addEventListener("click", function () { modal.remove(); });
+
+        // Layout toggle
+        var layoutMode = "horizontal";
+        var toggleBtn = document.getElementById("fe-layout-toggle");
+        var bodyEl = document.getElementById("fe-compare-body");
+        toggleBtn.addEventListener("click", function () {
+            layoutMode = layoutMode === "horizontal" ? "vertical" : "horizontal";
+            bodyEl.className = "fe-compare-body " + (layoutMode === "vertical" ? "fe-compare-vertical" : "");
+            toggleBtn.textContent = layoutMode === "horizontal" ? "\u2B0C Side-by-side" : "\u2B0D Stacked";
+            cvRender();
+        });
+
+        // PDF state
+        var cvState = { doc: null, page: 1, total: 0, zoom: 1.0, regions: null };
+        var canvas = document.getElementById("fe-cv-canvas");
+        var wrap = document.getElementById("fe-cv-wrap");
+        var overlay = document.getElementById("fe-cv-overlay");
+        var mdEl = document.getElementById("fe-cv-md");
+
+        function cvRender() {
+            if (!cvState.doc || !canvas) return;
+            cvState.doc.getPage(cvState.page).then(function (page) {
+                var cw = (wrap && wrap.clientWidth > 40) ? wrap.clientWidth - 20 : 400;
+                var ch = (wrap && wrap.clientHeight > 40) ? wrap.clientHeight - 20 : 500;
+                var vp0 = page.getViewport({ scale: 1 });
+                var base = Math.min(cw / vp0.width, ch / vp0.height);
+                var sc = base * cvState.zoom;
+                var vp = page.getViewport({ scale: sc });
+                canvas.width = vp.width;
+                canvas.height = vp.height;
+                page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise.then(function () {
+                    if (overlay && wrap) {
+                        var cr = canvas.getBoundingClientRect();
+                        var wr = wrap.getBoundingClientRect();
+                        overlay.style.left = (cr.left - wr.left + wrap.scrollLeft) + "px";
+                        overlay.style.top = (cr.top - wr.top + wrap.scrollTop) + "px";
+                        overlay.style.width = canvas.width + "px";
+                        overlay.style.height = canvas.height + "px";
+                    }
+                    cvDrawBoxes();
+                });
+            });
+            document.getElementById("fe-cv-page").textContent = cvState.page + " / " + cvState.total;
+            document.getElementById("fe-cv-zoom").textContent = Math.round(cvState.zoom * 100) + "%";
+        }
+
+        function cvDrawBoxes() {
+            if (!overlay || !cvState.regions) return;
+            overlay.innerHTML = "";
+            var pageRegions = cvState.regions[cvState.page - 1] || [];
+            var cw = canvas.width, ch = canvas.height;
+            pageRegions.forEach(function (r, ri) {
+                if (!r.bbox_2d || r.bbox_2d.length < 4) return;
+                var rect = document.createElement("div");
+                rect.className = "region-rect";
+                rect.setAttribute("data-page", cvState.page - 1);
+                rect.setAttribute("data-region", r.index != null ? r.index : ri);
+                rect.style.left = (r.bbox_2d[0] / 1000 * cw) + "px";
+                rect.style.top = (r.bbox_2d[1] / 1000 * ch) + "px";
+                rect.style.width = ((r.bbox_2d[2] - r.bbox_2d[0]) / 1000 * cw) + "px";
+                rect.style.height = ((r.bbox_2d[3] - r.bbox_2d[1]) / 1000 * ch) + "px";
+                rect.title = (r.label || "region") + " — click to copy";
+                // Copy on click
+                (function (content) {
+                    rect.addEventListener("click", function () {
+                        if (content) navigator.clipboard.writeText(content.trim());
+                    });
+                })(r.content);
+                overlay.appendChild(rect);
+            });
+            // PDF → markdown hover
+            overlay.addEventListener("mouseenter", function (e) {
+                var r = e.target.closest(".region-rect");
+                if (!r) return;
+                r.classList.add("active");
+                var pg = r.getAttribute("data-page");
+                var ri = r.getAttribute("data-region");
+                var block = mdEl.querySelector('.region-block[data-page="' + pg + '"][data-region="' + ri + '"]');
+                if (block) { block.classList.add("region-hover"); block.scrollIntoView({ behavior: "smooth", block: "center" }); }
+            }, true);
+            overlay.addEventListener("mouseleave", function (e) {
+                var r = e.target.closest(".region-rect");
+                if (!r) return;
+                r.classList.remove("active");
+                mdEl.querySelectorAll(".region-hover").forEach(function (el) { el.classList.remove("region-hover"); });
+            }, true);
+        }
+
+        function cvBuildMd(regions) {
+            mdEl.innerHTML = "";
+            var container = document.createDocumentFragment();
+            for (var p = 0; p < regions.length; p++) {
+                var section = document.createElement("div");
+                section.className = "page-section";
+                if (regions.length > 1) {
+                    var label = document.createElement("div");
+                    label.className = "page-label";
+                    label.textContent = "Page " + (p + 1);
+                    section.appendChild(label);
+                }
+                (regions[p] || []).forEach(function (r, ri) {
+                    var content = r.content;
+                    if (!content || (typeof content === "string" && !content.trim())) return;
+                    var block = document.createElement("div");
+                    block.className = "region-block";
+                    block.setAttribute("data-page", p);
+                    block.setAttribute("data-region", r.index != null ? r.index : ri);
+                    var html = _renderMdHtml(content, stem);
+                    block.innerHTML = html;
+                    // Markdown → PDF hover
+                    (function (el, pg, region) {
+                        el.addEventListener("mouseenter", function () {
+                            el.classList.add("region-hover");
+                            if (cvState.page !== pg + 1) { cvState.page = pg + 1; cvRender(); }
+                            setTimeout(function () {
+                                if (!overlay) return;
+                                overlay.querySelectorAll(".region-rect.active").forEach(function (x) { x.classList.remove("active"); });
+                                var target = overlay.querySelector('.region-rect[data-region="' + region + '"]');
+                                if (target) target.classList.add("active");
+                            }, cvState.page !== pg + 1 ? 300 : 0);
+                        });
+                        el.addEventListener("mouseleave", function () {
+                            el.classList.remove("region-hover");
+                            if (overlay) overlay.querySelectorAll(".region-rect.active").forEach(function (x) { x.classList.remove("active"); });
+                        });
+                        el.addEventListener("click", function () {
+                            if (content) navigator.clipboard.writeText(content.trim()).then(function () {
+                                el.classList.add("region-copied");
+                                setTimeout(function () { el.classList.remove("region-copied"); }, 800);
+                            });
+                        });
+                    })(block, p, r.index != null ? r.index : ri);
+                    section.appendChild(block);
+                });
+                container.appendChild(section);
+            }
+            mdEl.appendChild(container);
+        }
+
+        // Controls
+        document.getElementById("fe-cv-prev").addEventListener("click", function () { if (cvState.page > 1) { cvState.page--; cvRender(); } });
+        document.getElementById("fe-cv-next").addEventListener("click", function () { if (cvState.page < cvState.total) { cvState.page++; cvRender(); } });
+        document.getElementById("fe-cv-zin").addEventListener("click", function () { cvState.zoom = Math.min(cvState.zoom + 0.25, 3.0); cvRender(); });
+        document.getElementById("fe-cv-zout").addEventListener("click", function () { cvState.zoom = Math.max(cvState.zoom - 0.25, 0.5); cvRender(); });
+
+        // Load PDF
+        if (folder.input_file && typeof pdfjsLib !== "undefined") {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+            var pdfUrl = "/api/uploaded/" + encodeURIComponent(folder.input_file);
+            pdfjsLib.getDocument(pdfUrl).promise.then(function (doc) {
+                cvState.doc = doc;
+                cvState.total = doc.numPages;
+                cvState.page = 1;
+                cvRender();
+            });
+        }
+
+        // Load JSON regions + build markdown
+        var jsonFile = folder.files.find(function (f) { return f.name.endsWith(".json"); });
+        if (jsonFile) {
+            fetch("/api/files/" + encodeURIComponent(stem) + "/" + encodeURIComponent(jsonFile.name))
+                .then(function (r) { return r.json(); })
+                .then(function (regions) {
+                    cvState.regions = regions;
+                    cvDrawBoxes();
+                    cvBuildMd(regions);
+                });
+        }
     }
 
     function _feType(name) {
