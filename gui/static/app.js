@@ -2666,7 +2666,6 @@
                 rect.style.width = ((r.bbox_2d[2] - r.bbox_2d[0]) / 1000 * cw) + "px";
                 rect.style.height = ((r.bbox_2d[3] - r.bbox_2d[1]) / 1000 * ch) + "px";
                 rect.title = (r.label || "region") + " — click to copy";
-                // Copy on click
                 (function (content) {
                     rect.addEventListener("click", function () {
                         if (content) navigator.clipboard.writeText(content.trim());
@@ -2674,22 +2673,33 @@
                 })(r.content);
                 overlay.appendChild(rect);
             });
-            // PDF → markdown hover
-            overlay.addEventListener("mouseenter", function (e) {
-                var r = e.target.closest(".region-rect");
-                if (!r) return;
-                r.classList.add("active");
-                var pg = r.getAttribute("data-page");
-                var ri = r.getAttribute("data-region");
-                var block = mdEl.querySelector('.region-block[data-page="' + pg + '"][data-region="' + ri + '"]');
-                if (block) { block.classList.add("region-hover"); block.scrollIntoView({ behavior: "smooth", block: "center" }); }
-            }, true);
-            overlay.addEventListener("mouseleave", function (e) {
-                var r = e.target.closest(".region-rect");
-                if (!r) return;
-                r.classList.remove("active");
-                mdEl.querySelectorAll(".region-hover").forEach(function (el) { el.classList.remove("region-hover"); });
-            }, true);
+        }
+
+        // PDF → markdown hover (wire ONCE, event delegation)
+        overlay.addEventListener("mouseenter", function (e) {
+            var r = e.target.closest(".region-rect");
+            if (!r) return;
+            r.classList.add("active");
+            var pg = r.getAttribute("data-page");
+            var ri = r.getAttribute("data-region");
+            var block = mdEl.querySelector('.region-block[data-page="' + pg + '"][data-region="' + ri + '"]');
+            if (block) { block.classList.add("region-hover"); block.scrollIntoView({ behavior: "smooth", block: "center" }); }
+        }, true);
+        overlay.addEventListener("mouseleave", function (e) {
+            var r = e.target.closest(".region-rect");
+            if (!r) return;
+            r.classList.remove("active");
+            mdEl.querySelectorAll(".region-hover").forEach(function (el) { el.classList.remove("region-hover"); });
+        }, true);
+
+        // Helper: highlight a PDF box by region index
+        function cvHighlightBox(regionIdx) {
+            overlay.querySelectorAll(".region-rect.active").forEach(function (x) { x.classList.remove("active"); });
+            var target = overlay.querySelector('.region-rect[data-region="' + regionIdx + '"]');
+            if (target) target.classList.add("active");
+        }
+        function cvClearBoxHighlight() {
+            overlay.querySelectorAll(".region-rect.active").forEach(function (x) { x.classList.remove("active"); });
         }
 
         function cvBuildMd(regions) {
@@ -2717,17 +2727,18 @@
                     (function (el, pg, region) {
                         el.addEventListener("mouseenter", function () {
                             el.classList.add("region-hover");
-                            if (cvState.page !== pg + 1) { cvState.page = pg + 1; cvRender(); }
-                            setTimeout(function () {
-                                if (!overlay) return;
-                                overlay.querySelectorAll(".region-rect.active").forEach(function (x) { x.classList.remove("active"); });
-                                var target = overlay.querySelector('.region-rect[data-region="' + region + '"]');
-                                if (target) target.classList.add("active");
-                            }, cvState.page !== pg + 1 ? 300 : 0);
+                            if (cvState.page !== pg + 1) {
+                                cvState.page = pg + 1;
+                                cvRender();
+                                // Wait for page render then highlight box
+                                setTimeout(function () { cvHighlightBox(region); }, 400);
+                            } else {
+                                cvHighlightBox(region);
+                            }
                         });
                         el.addEventListener("mouseleave", function () {
                             el.classList.remove("region-hover");
-                            if (overlay) overlay.querySelectorAll(".region-rect.active").forEach(function (x) { x.classList.remove("active"); });
+                            cvClearBoxHighlight();
                         });
                         el.addEventListener("click", function () {
                             if (content) navigator.clipboard.writeText(content.trim()).then(function () {
