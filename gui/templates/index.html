@@ -20,45 +20,101 @@
 </div>
 
 {# ── OCR Settings (collapsible, below upload zone) ── #}
+{% set dpi_val = values.get('pipeline.page_loader.pdf_dpi', 200) %}
+{% set thresh_val = values.get('pipeline.layout.threshold', 0.3) %}
+{% set fmt_val = values.get('pipeline.page_loader.image_format', 'JPEG') %}
+{% set tokens_val = values.get('pipeline.page_loader.max_tokens', 8192) %}
+{% set poly_val = values.get('pipeline.layout.use_polygon', false) %}
+{% set unclip_val = values.get('pipeline.layout.layout_unclip_ratio', [1.0, 1.0]) %}
+{% set rep_val = values.get('pipeline.page_loader.repetition_penalty', 1.1) %}
 <details class="ocr-settings-panel" id="ocr-settings-panel">
     <summary>OCR Settings</summary>
     <div class="ocr-settings-grid">
+
+        {# ── PDF DPI ── #}
         <div class="ocr-setting">
-            <label for="ocr-dpi">PDF DPI</label>
-            <input type="number" id="ocr-dpi" value="{{ values.get('pipeline.page_loader.pdf_dpi', 200) }}" min="100" max="600" step="50">
-            <span class="ocr-hint">Higher = better for small text (100-600)</span>
+            <label>PDF DPI <span class="ocr-help" data-tip="Resolution for PDF→image conversion.\n\n• 150: Fast, good for large clear text (~0.5x time)\n• 200: Default balance of speed and quality\n• 300: Better for small text, dense pages (~1.5x time)\n• 400+: Maximum detail, slow (~2-3x time)\n\nHigher DPI = larger images = longer processing.">?</span></label>
+            <div class="ocr-presets" data-target="ocr-dpi">
+                <button class="ocr-preset {{ 'active' if dpi_val == 150 }}" data-val="150">Fast</button>
+                <button class="ocr-preset {{ 'active' if dpi_val == 200 }}" data-val="200">Default</button>
+                <button class="ocr-preset {{ 'active' if dpi_val == 300 }}" data-val="300">Quality</button>
+                <button class="ocr-preset {{ 'active' if dpi_val == 400 }}" data-val="400">Max</button>
+            </div>
+            <input type="number" id="ocr-dpi" value="{{ dpi_val }}" min="100" max="600" step="10" class="ocr-custom">
         </div>
+
+        {# ── Layout Threshold ── #}
         <div class="ocr-setting">
-            <label for="ocr-threshold">Layout Threshold</label>
-            <input type="number" id="ocr-threshold" value="{{ values.get('pipeline.layout.threshold', 0.3) }}" min="0.01" max="1.0" step="0.05">
-            <span class="ocr-hint">Lower = detect more regions (0.01-1.0)</span>
+            <label>Layout Threshold <span class="ocr-help" data-tip="Confidence threshold for detecting text regions.\n\n• 0.1: Aggressive — finds everything, may include noise\n• 0.2: Sensitive — catches faint/small regions\n• 0.3: Default — balanced detection\n• 0.5: Conservative — only high-confidence regions\n\nLower = more regions detected = slightly longer OCR.\nIf text is missed, try lowering to 0.1-0.2.">?</span></label>
+            <div class="ocr-presets" data-target="ocr-threshold">
+                <button class="ocr-preset {{ 'active' if thresh_val <= 0.1 }}" data-val="0.1">Aggressive</button>
+                <button class="ocr-preset {{ 'active' if thresh_val > 0.1 and thresh_val <= 0.2 }}" data-val="0.2">Sensitive</button>
+                <button class="ocr-preset {{ 'active' if thresh_val > 0.2 and thresh_val <= 0.35 }}" data-val="0.3">Default</button>
+                <button class="ocr-preset {{ 'active' if thresh_val > 0.35 }}" data-val="0.5">Conservative</button>
+            </div>
+            <input type="number" id="ocr-threshold" value="{{ thresh_val }}" min="0.01" max="1.0" step="0.01" class="ocr-custom">
         </div>
+
+        {# ── Image Format ── #}
         <div class="ocr-setting">
-            <label for="ocr-format">Image Format</label>
-            <select id="ocr-format">
-                <option value="JPEG" {{ 'selected' if values.get('pipeline.page_loader.image_format', 'JPEG') == 'JPEG' }}>JPEG</option>
-                <option value="PNG" {{ 'selected' if values.get('pipeline.page_loader.image_format') == 'PNG' }}>PNG (lossless)</option>
-                <option value="WEBP" {{ 'selected' if values.get('pipeline.page_loader.image_format') == 'WEBP' }}>WEBP</option>
+            <label>Image Format <span class="ocr-help" data-tip="Format for encoding page images before OCR.\n\n• JPEG: Fast, small files, slight compression artifacts\n• PNG: Lossless, best for fine text/diagrams (~2x slower)\n• WEBP: Good balance of quality and size\n\nUse PNG if small text or thin lines are being misread.">?</span></label>
+            <div class="ocr-presets" data-target="ocr-format">
+                <button class="ocr-preset {{ 'active' if fmt_val == 'JPEG' }}" data-val="JPEG">JPEG</button>
+                <button class="ocr-preset {{ 'active' if fmt_val == 'PNG' }}" data-val="PNG">PNG</button>
+                <button class="ocr-preset {{ 'active' if fmt_val == 'WEBP' }}" data-val="WEBP">WEBP</button>
+            </div>
+            <select id="ocr-format" class="ocr-custom">
+                <option value="JPEG" {{ 'selected' if fmt_val == 'JPEG' }}>JPEG — fast, lossy</option>
+                <option value="PNG" {{ 'selected' if fmt_val == 'PNG' }}>PNG — lossless, slower</option>
+                <option value="WEBP" {{ 'selected' if fmt_val == 'WEBP' }}>WEBP — balanced</option>
             </select>
-            <span class="ocr-hint">PNG better for fine details</span>
         </div>
+
+        {# ── Max Tokens ── #}
         <div class="ocr-setting">
-            <label for="ocr-max-tokens">Max Tokens</label>
-            <input type="number" id="ocr-max-tokens" value="{{ values.get('pipeline.page_loader.max_tokens', 8192) }}" min="1024" max="32768" step="1024">
-            <span class="ocr-hint">Increase for dense text blocks</span>
+            <label>Max Tokens <span class="ocr-help" data-tip="Maximum output length per region (in tokens ≈ words).\n\n• 4096: Fast, sufficient for short paragraphs\n• 8192: Default — handles most text blocks\n• 16384: For very dense text or large tables\n• 32768: Maximum — for extremely long content\n\nHigher = can output more text but uses more memory.\nIncrease if text is being truncated mid-sentence.">?</span></label>
+            <div class="ocr-presets" data-target="ocr-max-tokens">
+                <button class="ocr-preset {{ 'active' if tokens_val <= 4096 }}" data-val="4096">Short</button>
+                <button class="ocr-preset {{ 'active' if tokens_val > 4096 and tokens_val <= 8192 }}" data-val="8192">Default</button>
+                <button class="ocr-preset {{ 'active' if tokens_val > 8192 and tokens_val <= 16384 }}" data-val="16384">Long</button>
+                <button class="ocr-preset {{ 'active' if tokens_val > 16384 }}" data-val="32768">Max</button>
+            </div>
+            <input type="number" id="ocr-max-tokens" value="{{ tokens_val }}" min="1024" max="32768" step="512" class="ocr-custom">
         </div>
+
+        {# ── Polygon Cropping ── #}
         <div class="ocr-setting">
-            <label for="ocr-polygon">
-                <input type="checkbox" id="ocr-polygon" {{ 'checked' if values.get('pipeline.layout.use_polygon', false) }}>
-                Polygon cropping
-            </label>
-            <span class="ocr-hint">Better for rotated layouts</span>
+            <label>Region Cropping <span class="ocr-help" data-tip="How detected regions are extracted from the page.\n\n• Box: Fast rectangular crop (default)\n• Polygon: Precise outline mask — masks out content outside the detected shape\n\nUse Polygon for rotated text, tilted scans, or staggered multi-column layouts.\nSlightly slower due to mask generation.">?</span></label>
+            <div class="ocr-presets" data-target="ocr-polygon">
+                <button class="ocr-preset {{ 'active' if not poly_val }}" data-val="false">Box</button>
+                <button class="ocr-preset {{ 'active' if poly_val }}" data-val="true">Polygon</button>
+            </div>
+            <input type="hidden" id="ocr-polygon" value="{{ 'true' if poly_val else 'false' }}">
         </div>
+
+        {# ── Unclip Ratio ── #}
         <div class="ocr-setting">
-            <label for="ocr-unclip">Unclip Ratio</label>
-            <input type="number" id="ocr-unclip" value="{{ values.get('pipeline.layout.layout_unclip_ratio', [1.0, 1.0])[0] }}" min="0.9" max="1.3" step="0.05">
-            <span class="ocr-hint">Expand box edges (1.0 = no change)</span>
+            <label>Box Expansion <span class="ocr-help" data-tip="How much to expand detected region boxes.\n\n• 1.0: No expansion (exact detection boundary)\n• 1.05: Slight expansion — catches clipped edges\n• 1.1: Moderate — for text near margins\n• 1.2+: Large — may overlap adjacent regions\n\nUseful when text at edges of regions is being cut off.\nNo impact on speed.">?</span></label>
+            <div class="ocr-presets" data-target="ocr-unclip">
+                <button class="ocr-preset {{ 'active' if unclip_val[0] <= 1.0 }}" data-val="1.0">None</button>
+                <button class="ocr-preset {{ 'active' if unclip_val[0] > 1.0 and unclip_val[0] <= 1.05 }}" data-val="1.05">Slight</button>
+                <button class="ocr-preset {{ 'active' if unclip_val[0] > 1.05 and unclip_val[0] <= 1.1 }}" data-val="1.1">Medium</button>
+                <button class="ocr-preset {{ 'active' if unclip_val[0] > 1.1 }}" data-val="1.2">Large</button>
+            </div>
+            <input type="number" id="ocr-unclip" value="{{ unclip_val[0] }}" min="0.9" max="1.3" step="0.01" class="ocr-custom">
         </div>
+
+        {# ── Repetition Penalty ── #}
+        <div class="ocr-setting">
+            <label>Repetition Penalty <span class="ocr-help" data-tip="Penalizes the model for repeating the same text.\n\n• 1.0: No penalty — allows natural repetition\n• 1.1: Default — mild suppression of loops\n• 1.3: Strong — prevents repetitive output\n\nLower if repeated characters (e.g. 'lll', '000') are being suppressed.\nHigher if the model gets stuck in output loops.">?</span></label>
+            <div class="ocr-presets" data-target="ocr-rep-penalty">
+                <button class="ocr-preset {{ 'active' if rep_val <= 1.0 }}" data-val="1.0">Off</button>
+                <button class="ocr-preset {{ 'active' if rep_val > 1.0 and rep_val <= 1.15 }}" data-val="1.1">Default</button>
+                <button class="ocr-preset {{ 'active' if rep_val > 1.15 }}" data-val="1.3">Strong</button>
+            </div>
+            <input type="number" id="ocr-rep-penalty" value="{{ rep_val }}" min="1.0" max="2.0" step="0.05" class="ocr-custom">
+        </div>
+
     </div>
 </details>
 

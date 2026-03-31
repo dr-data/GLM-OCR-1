@@ -274,11 +274,96 @@ h2 {
     outline: none;
 }
 
-.ocr-hint {
-    display: block;
-    font-size: 10px;
+/* Preset buttons row */
+.ocr-presets {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 4px;
+}
+
+.ocr-preset {
+    flex: 1;
+    padding: 4px 6px;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
     color: var(--text-muted);
-    margin-top: 2px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.ocr-preset:hover {
+    color: var(--accent-cyan);
+    border-color: var(--accent-cyan);
+}
+
+.ocr-preset.active {
+    color: var(--accent-cyan);
+    border-color: var(--accent-cyan);
+    background: rgba(0, 204, 204, 0.1);
+}
+
+.ocr-custom {
+    width: 100%;
+    padding: 3px 8px;
+    font-size: 12px;
+    font-family: var(--font-mono);
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-muted);
+}
+
+.ocr-custom:focus {
+    border-color: var(--accent-cyan);
+    color: var(--text-primary);
+    outline: none;
+}
+
+/* Help tooltip */
+.ocr-help {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 15px;
+    height: 15px;
+    font-size: 10px;
+    font-weight: bold;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    cursor: help;
+    position: relative;
+    vertical-align: middle;
+    margin-left: 4px;
+}
+
+.ocr-help:hover {
+    color: var(--accent-cyan);
+    border-color: var(--accent-cyan);
+}
+
+.ocr-help:hover::after {
+    content: attr(data-tip);
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 8px);
+    transform: translateX(-50%);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 8px 12px;
+    font-size: 11px;
+    font-weight: normal;
+    line-height: 1.5;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    width: 280px;
+    z-index: 100;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    pointer-events: none;
 }
 
 .btn-retry {

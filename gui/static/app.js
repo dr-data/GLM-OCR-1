@@ -604,6 +604,31 @@
         }
     }
 
+    // Wire OCR preset buttons ↔ custom input sync
+    document.querySelectorAll(".ocr-presets").forEach(function (row) {
+        var targetId = row.getAttribute("data-target");
+        var input = document.getElementById(targetId);
+        if (!input) return;
+        row.querySelectorAll(".ocr-preset").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                row.querySelectorAll(".ocr-preset").forEach(function (b) { b.classList.remove("active"); });
+                btn.classList.add("active");
+                input.value = btn.getAttribute("data-val");
+                // Trigger change event for selects
+                if (input.tagName === "SELECT") {
+                    input.dispatchEvent(new Event("change"));
+                }
+            });
+        });
+        // Sync: when custom input changes, update active preset
+        input.addEventListener("input", function () {
+            var val = input.value;
+            row.querySelectorAll(".ocr-preset").forEach(function (b) {
+                b.classList.toggle("active", b.getAttribute("data-val") === val);
+            });
+        });
+    });
+
     function getOcrSettings() {
         var s = {};
         var dpi = document.getElementById("ocr-dpi");
@@ -612,12 +637,14 @@
         var maxTokens = document.getElementById("ocr-max-tokens");
         var polygon = document.getElementById("ocr-polygon");
         var unclip = document.getElementById("ocr-unclip");
+        var repPenalty = document.getElementById("ocr-rep-penalty");
         if (dpi) s["pipeline.page_loader.pdf_dpi"] = parseInt(dpi.value, 10);
         if (threshold) s["pipeline.layout.threshold"] = parseFloat(threshold.value);
         if (format) s["pipeline.page_loader.image_format"] = format.value;
         if (maxTokens) s["pipeline.page_loader.max_tokens"] = parseInt(maxTokens.value, 10);
-        if (polygon) s["pipeline.layout.use_polygon"] = polygon.checked;
+        if (polygon) s["pipeline.layout.use_polygon"] = polygon.value === "true";
         if (unclip) s["pipeline.layout.layout_unclip_ratio"] = [parseFloat(unclip.value), parseFloat(unclip.value)];
+        if (repPenalty) s["pipeline.page_loader.repetition_penalty"] = parseFloat(repPenalty.value);
         return s;
     }
 
