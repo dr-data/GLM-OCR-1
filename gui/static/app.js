@@ -2219,4 +2219,521 @@
             .catch(function () {});
     })();
 
+    // ── Hamburger Menu ───────────────────────────────
+    var hamburgerBtn = document.getElementById("hamburger-btn");
+    var navLinksEl = document.getElementById("nav-links");
+    if (hamburgerBtn && navLinksEl) {
+        hamburgerBtn.addEventListener("click", function () {
+            navLinksEl.classList.toggle("open");
+            hamburgerBtn.classList.toggle("active");
+        });
+        navLinksEl.querySelectorAll("a").forEach(function (a) {
+            a.addEventListener("click", function () {
+                navLinksEl.classList.remove("open");
+                hamburgerBtn.classList.remove("active");
+            });
+        });
+    }
+
+    // ── File Explorer ────────────────────────────────
+    var fileTree = document.getElementById("file-tree");
+    if (fileTree) {
+        fetch("/api/files")
+            .then(function (r) { return r.json(); })
+            .then(function (folders) {
+                if (!folders.length) { fileTree.textContent = "No processed files yet."; return; }
+                fileTree.innerHTML = "";
+
+                // Bulk action toolbar
+                var toolbar = document.createElement("div");
+                toolbar.className = "fe-toolbar";
+                toolbar.innerHTML =
+                    '<label class="fe-select-all-label"><input type="checkbox" id="fe-select-all"> Select All</label>' +
+                    '<button class="fe-bulk-btn" id="fe-bulk-deselect" disabled>Deselect</button>' +
+                    '<button class="fe-bulk-btn fe-bulk-download" id="fe-bulk-download" disabled>\u2193 Download Selected</button>' +
+                    '<button class="fe-bulk-btn fe-bulk-delete" id="fe-bulk-delete" disabled>\u2717 Delete Selected</button>' +
+                    '<span class="fe-bulk-count" id="fe-bulk-count"></span>';
+                fileTree.appendChild(toolbar);
+
+                var folderCheckboxes = [];
+
+                function updateBulkState() {
+                    var checked = folderCheckboxes.filter(function (c) { return c.checked; });
+                    var count = checked.length;
+                    document.getElementById("fe-bulk-count").textContent = count > 0 ? count + " selected" : "";
+                    document.getElementById("fe-bulk-download").disabled = count === 0;
+                    document.getElementById("fe-bulk-delete").disabled = count === 0;
+                    document.getElementById("fe-bulk-deselect").disabled = count === 0;
+                    document.getElementById("fe-select-all").checked = count === folders.length && count > 0;
+                }
+
+                document.getElementById("fe-select-all").addEventListener("change", function () {
+                    var val = this.checked;
+                    folderCheckboxes.forEach(function (cb) { cb.checked = val; });
+                    updateBulkState();
+                });
+
+                document.getElementById("fe-bulk-deselect").addEventListener("click", function () {
+                    folderCheckboxes.forEach(function (cb) { cb.checked = false; });
+                    updateBulkState();
+                });
+
+                document.getElementById("fe-bulk-download").addEventListener("click", function () {
+                    var selected = folderCheckboxes.filter(function (c) { return c.checked; });
+                    if (selected.length === 1) {
+                        window.location.href = "/api/files/" + encodeURIComponent(selected[0].value) + "/zip";
+                    } else if (selected.length > 1) {
+                        var names = selected.map(function (c) { return c.value; });
+                        window.location.href = "/api/files/bulk-zip?stems=" + encodeURIComponent(names.join(","));
+                    }
+                });
+
+                document.getElementById("fe-bulk-delete").addEventListener("click", function () {
+                    var selected = folderCheckboxes.filter(function (c) { return c.checked; });
+                    var names = selected.map(function (c) { return c.value; });
+                    if (!names.length) return;
+                    if (!confirm("Delete " + names.length + " folder(s)?\n\n" + names.join("\n") + "\n\nThis cannot be undone.")) return;
+                    fetch("/api/files/bulk-delete", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ stems: names }),
+                    })
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        if (data.deleted) {
+                            // Remove deleted items from DOM
+                            data.deleted.forEach(function (stem) {
+                                var el = document.getElementById("fe-folder-" + stem);
+                                if (el) el.remove();
+                            });
+                            folderCheckboxes = folderCheckboxes.filter(function (c) { return !data.deleted.includes(c.value); });
+                            updateBulkState();
+                        }
+                    });
+                });
+
+                folders.forEach(function (folder) {
+                    var item = document.createElement("details");
+                    item.className = "fe-folder";
+                    item.id = "fe-folder-" + folder.name;
+                    var summary = document.createElement("summary");
+                    summary.className = "fe-folder-name";
+
+                    // Checkbox for selection
+                    var cb = document.createElement("input");
+                    cb.type = "checkbox";
+                    cb.className = "fe-folder-cb";
+                    cb.value = folder.name;
+                    cb.addEventListener("change", updateBulkState);
+                    cb.addEventListener("click", function (e) { e.stopPropagation(); });
+                    folderCheckboxes.push(cb);
+                    summary.appendChild(cb);
+
+                    var iconSpan = document.createElement("span");
+                    iconSpan.className = "fe-icon";
+                    iconSpan.textContent = "\uD83D\uDCC1";
+                    summary.appendChild(iconSpan);
+                    summary.appendChild(document.createTextNode(" " + folder.name));
+                    var zipBtn = document.createElement("a");
+                    zipBtn.href = "/api/files/" + encodeURIComponent(folder.name) + "/zip";
+                    zipBtn.className = "fe-zip-btn";
+                    zipBtn.textContent = "\u2193 ZIP";
+                    zipBtn.title = "Download all as ZIP";
+                    zipBtn.addEventListener("click", function (e) { e.stopPropagation(); });
+                    summary.appendChild(zipBtn);
+
+                    // "Compare" button — opens pipeline-style side-by-side view
+                    if (folder.input_file) {
+                        var compareBtn = document.createElement("button");
+                        compareBtn.className = "fe-compare-btn";
+                        compareBtn.textContent = "Compare";
+                        compareBtn.title = "Side-by-side PDF + Markdown with box references";
+                        (function (f) {
+                            compareBtn.addEventListener("click", function (e) {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                _feOpenCompareView(f);
+                            });
+                        })(folder);
+                        summary.appendChild(compareBtn);
+                    }
+
+                    item.appendChild(summary);
+
+                    var content = document.createElement("div");
+                    content.className = "fe-content";
+
+                    if (folder.input_file) {
+                        var sec = document.createElement("div");
+                        sec.className = "fe-section";
+                        sec.innerHTML = '<div class="fe-section-label">Input</div>';
+                        sec.appendChild(_feFileItem(folder.name, "../uploads/" + folder.input_file, folder.input_file, "input"));
+                        content.appendChild(sec);
+                    }
+                    if (folder.files.length) {
+                        var sec2 = document.createElement("div");
+                        sec2.className = "fe-section";
+                        sec2.innerHTML = '<div class="fe-section-label">Output</div>';
+                        folder.files.forEach(function (f) {
+                            sec2.appendChild(_feFileItem(folder.name, f.name, f.name, _feType(f.name), f.size));
+                        });
+                        content.appendChild(sec2);
+                    }
+                    if (folder.has_images && folder.images && folder.images.length) {
+                        var sec3 = document.createElement("div");
+                        sec3.className = "fe-section";
+                        sec3.innerHTML = '<div class="fe-section-label">Extracted Images (' + folder.images.length + ')</div>';
+                        var grid = document.createElement("div");
+                        grid.className = "fe-img-grid";
+                        folder.images.forEach(function (img) {
+                            var thumb = document.createElement("div");
+                            thumb.className = "fe-thumb";
+                            var imgUrl = "/api/files/" + encodeURIComponent(folder.name) + "/imgs/" + encodeURIComponent(img);
+                            thumb.innerHTML =
+                                '<img src="' + imgUrl + '" loading="lazy">' +
+                                '<div class="fe-thumb-name">' + escapeHtml(img) + '</div>' +
+                                '<a href="' + imgUrl + '" download class="fe-dl-btn">\u2193</a>';
+                            grid.appendChild(thumb);
+                        });
+                        sec3.appendChild(grid);
+                        content.appendChild(sec3);
+                    }
+                    item.appendChild(content);
+                    fileTree.appendChild(item);
+                });
+            })
+            .catch(function () { fileTree.textContent = "Failed to load files."; });
+    }
+
+    // ── Compare View (pipeline-style side-by-side) ──
+    function _feOpenCompareView(folder) {
+        var old = document.getElementById("fe-modal");
+        if (old) old.remove();
+
+        var stem = folder.name;
+        var modal = document.createElement("div");
+        modal.id = "fe-modal";
+        modal.className = "fe-modal fe-compare-modal";
+
+        modal.innerHTML =
+            '<div class="fe-modal-header">' +
+                '<span>' + escapeHtml(stem) + ' — Compare</span>' +
+                '<div>' +
+                    '<button class="fe-layout-toggle" id="fe-layout-toggle">\u2B0C Side-by-side</button>' +
+                    '<button class="fe-modal-close">&times;</button>' +
+                '</div>' +
+            '</div>' +
+            '<div class="fe-compare-body" id="fe-compare-body">' +
+                // Left: PDF with controls
+                '<div class="fe-compare-left">' +
+                    '<div class="fe-compare-panel-label">Input</div>' +
+                    '<div class="fe-cv-controls">' +
+                        '<button id="fe-cv-prev">&laquo;</button>' +
+                        '<span id="fe-cv-page">- / -</span>' +
+                        '<button id="fe-cv-next">&raquo;</button>' +
+                        '<span class="pdf-controls-sep">|</span>' +
+                        '<button id="fe-cv-zout">-</button>' +
+                        '<span id="fe-cv-zoom">100%</span>' +
+                        '<button id="fe-cv-zin">+</button>' +
+                    '</div>' +
+                    '<div class="fe-cv-canvas-wrap" id="fe-cv-wrap">' +
+                        '<canvas id="fe-cv-canvas"></canvas>' +
+                        '<div class="pdf-overlay" id="fe-cv-overlay"></div>' +
+                    '</div>' +
+                '</div>' +
+                // Right: Output with tabs (Preview / Raw / Full MD)
+                '<div class="fe-compare-right">' +
+                    '<div class="fe-compare-panel-label">' +
+                        '<span>Output</span>' +
+                        '<span class="fe-cv-tabs">' +
+                            '<button class="tab active" id="fe-cv-tab-preview" data-tab="preview">Preview</button>' +
+                            '<button class="tab" id="fe-cv-tab-raw" data-tab="raw">Raw</button>' +
+                            '<button class="tab" id="fe-cv-tab-fullmd" data-tab="fullmd">Full MD</button>' +
+                        '</span>' +
+                    '</div>' +
+                    '<div class="fe-cv-md" id="fe-cv-md">Loading...</div>' +
+                    '<div class="fe-cv-raw hidden" id="fe-cv-raw"><pre id="fe-cv-rawpre"></pre></div>' +
+                    '<div class="fe-cv-fullmd hidden" id="fe-cv-fullmd"><pre id="fe-cv-fullpre"></pre></div>' +
+                '</div>' +
+            '</div>';
+
+        document.body.appendChild(modal);
+        modal.querySelector(".fe-modal-close").addEventListener("click", function () { modal.remove(); });
+
+        // Layout toggle
+        var layoutMode = "horizontal";
+        var toggleBtn = document.getElementById("fe-layout-toggle");
+        var bodyEl = document.getElementById("fe-compare-body");
+        toggleBtn.addEventListener("click", function () {
+            layoutMode = layoutMode === "horizontal" ? "vertical" : "horizontal";
+            bodyEl.className = "fe-compare-body " + (layoutMode === "vertical" ? "fe-compare-vertical" : "");
+            toggleBtn.textContent = layoutMode === "horizontal" ? "\u2B0C Side-by-side" : "\u2B0D Stacked";
+            cvRender();
+        });
+
+        // Tab switching
+        ["preview", "raw", "fullmd"].forEach(function (tab) {
+            var btn = document.getElementById("fe-cv-tab-" + tab);
+            if (btn) btn.addEventListener("click", function () {
+                modal.querySelectorAll(".fe-cv-tabs .tab").forEach(function (t) { t.classList.remove("active"); });
+                btn.classList.add("active");
+                ["preview", "raw", "fullmd"].forEach(function (t) {
+                    var panel = document.getElementById("fe-cv-" + (t === "preview" ? "md" : t));
+                    if (panel) panel.classList.toggle("hidden", t !== tab);
+                });
+            });
+        });
+
+        // PDF state
+        var cvState = { doc: null, page: 1, total: 0, zoom: 1.0, regions: null, rawMd: "" };
+        var canvas = document.getElementById("fe-cv-canvas");
+        var wrap = document.getElementById("fe-cv-wrap");
+        var overlay = document.getElementById("fe-cv-overlay");
+        var mdEl = document.getElementById("fe-cv-md");
+
+        function cvRender() {
+            if (!cvState.doc || !canvas) return;
+            cvState.doc.getPage(cvState.page).then(function (page) {
+                var cw = (wrap && wrap.clientWidth > 40) ? wrap.clientWidth - 20 : 400;
+                var ch = (wrap && wrap.clientHeight > 40) ? wrap.clientHeight - 20 : 500;
+                var vp0 = page.getViewport({ scale: 1 });
+                var base = Math.min(cw / vp0.width, ch / vp0.height);
+                var sc = base * cvState.zoom;
+                var vp = page.getViewport({ scale: sc });
+                canvas.width = vp.width;
+                canvas.height = vp.height;
+                page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise.then(function () {
+                    if (overlay && wrap) {
+                        var cr = canvas.getBoundingClientRect();
+                        var wr = wrap.getBoundingClientRect();
+                        overlay.style.left = (cr.left - wr.left + wrap.scrollLeft) + "px";
+                        overlay.style.top = (cr.top - wr.top + wrap.scrollTop) + "px";
+                        overlay.style.width = canvas.width + "px";
+                        overlay.style.height = canvas.height + "px";
+                    }
+                    cvDrawBoxes();
+                });
+            });
+            document.getElementById("fe-cv-page").textContent = cvState.page + " / " + cvState.total;
+            document.getElementById("fe-cv-zoom").textContent = Math.round(cvState.zoom * 100) + "%";
+        }
+
+        function cvDrawBoxes() {
+            if (!overlay || !cvState.regions) return;
+            overlay.innerHTML = "";
+            var pageRegions = cvState.regions[cvState.page - 1] || [];
+            var cw = canvas.width, ch = canvas.height;
+            pageRegions.forEach(function (r, ri) {
+                if (!r.bbox_2d || r.bbox_2d.length < 4) return;
+                var rect = document.createElement("div");
+                rect.className = "region-rect";
+                rect.setAttribute("data-page", cvState.page - 1);
+                rect.setAttribute("data-region", r.index != null ? r.index : ri);
+                rect.style.left = (r.bbox_2d[0] / 1000 * cw) + "px";
+                rect.style.top = (r.bbox_2d[1] / 1000 * ch) + "px";
+                rect.style.width = ((r.bbox_2d[2] - r.bbox_2d[0]) / 1000 * cw) + "px";
+                rect.style.height = ((r.bbox_2d[3] - r.bbox_2d[1]) / 1000 * ch) + "px";
+                rect.title = (r.label || "region") + " — click to copy";
+                (function (content) {
+                    rect.addEventListener("click", function () {
+                        if (content) navigator.clipboard.writeText(content.trim());
+                    });
+                })(r.content);
+                overlay.appendChild(rect);
+            });
+        }
+
+        // PDF → markdown hover (wire ONCE, event delegation)
+        overlay.addEventListener("mouseenter", function (e) {
+            var r = e.target.closest(".region-rect");
+            if (!r) return;
+            r.classList.add("active");
+            var pg = r.getAttribute("data-page");
+            var ri = r.getAttribute("data-region");
+            var block = mdEl.querySelector('.region-block[data-page="' + pg + '"][data-region="' + ri + '"]');
+            if (block) { block.classList.add("region-hover"); block.scrollIntoView({ behavior: "smooth", block: "center" }); }
+        }, true);
+        overlay.addEventListener("mouseleave", function (e) {
+            var r = e.target.closest(".region-rect");
+            if (!r) return;
+            r.classList.remove("active");
+            mdEl.querySelectorAll(".region-hover").forEach(function (el) { el.classList.remove("region-hover"); });
+        }, true);
+
+        // Helper: highlight a PDF box by region index
+        function cvHighlightBox(regionIdx) {
+            overlay.querySelectorAll(".region-rect.active").forEach(function (x) { x.classList.remove("active"); });
+            var target = overlay.querySelector('.region-rect[data-region="' + regionIdx + '"]');
+            if (target) target.classList.add("active");
+        }
+        function cvClearBoxHighlight() {
+            overlay.querySelectorAll(".region-rect.active").forEach(function (x) { x.classList.remove("active"); });
+        }
+
+        function cvBuildMd(regions) {
+            mdEl.innerHTML = "";
+            var container = document.createDocumentFragment();
+            for (var p = 0; p < regions.length; p++) {
+                var section = document.createElement("div");
+                section.className = "page-section";
+                if (regions.length > 1) {
+                    var label = document.createElement("div");
+                    label.className = "page-label";
+                    label.textContent = "Page " + (p + 1);
+                    section.appendChild(label);
+                }
+                (regions[p] || []).forEach(function (r, ri) {
+                    var content = r.content;
+                    if (!content || (typeof content === "string" && !content.trim())) return;
+                    var block = document.createElement("div");
+                    block.className = "region-block";
+                    block.setAttribute("data-page", p);
+                    block.setAttribute("data-region", r.index != null ? r.index : ri);
+                    var html = _renderMdHtml(content, stem);
+                    block.innerHTML = html;
+                    // Markdown → PDF hover
+                    (function (el, pg, region) {
+                        el.addEventListener("mouseenter", function () {
+                            el.classList.add("region-hover");
+                            if (cvState.page !== pg + 1) {
+                                cvState.page = pg + 1;
+                                cvRender();
+                                // Wait for page render then highlight box
+                                setTimeout(function () { cvHighlightBox(region); }, 400);
+                            } else {
+                                cvHighlightBox(region);
+                            }
+                        });
+                        el.addEventListener("mouseleave", function () {
+                            el.classList.remove("region-hover");
+                            cvClearBoxHighlight();
+                        });
+                        el.addEventListener("click", function () {
+                            if (content) navigator.clipboard.writeText(content.trim()).then(function () {
+                                el.classList.add("region-copied");
+                                setTimeout(function () { el.classList.remove("region-copied"); }, 800);
+                            });
+                        });
+                    })(block, p, r.index != null ? r.index : ri);
+                    section.appendChild(block);
+                });
+                container.appendChild(section);
+            }
+            mdEl.appendChild(container);
+        }
+
+        // Controls
+        document.getElementById("fe-cv-prev").addEventListener("click", function () { if (cvState.page > 1) { cvState.page--; cvRender(); } });
+        document.getElementById("fe-cv-next").addEventListener("click", function () { if (cvState.page < cvState.total) { cvState.page++; cvRender(); } });
+        document.getElementById("fe-cv-zin").addEventListener("click", function () { cvState.zoom = Math.min(cvState.zoom + 0.25, 3.0); cvRender(); });
+        document.getElementById("fe-cv-zout").addEventListener("click", function () { cvState.zoom = Math.max(cvState.zoom - 0.25, 0.5); cvRender(); });
+
+        // Load PDF
+        if (folder.input_file && typeof pdfjsLib !== "undefined") {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+            var pdfUrl = "/api/uploaded/" + encodeURIComponent(folder.input_file);
+            pdfjsLib.getDocument(pdfUrl).promise.then(function (doc) {
+                cvState.doc = doc;
+                cvState.total = doc.numPages;
+                cvState.page = 1;
+                cvRender();
+            });
+        }
+
+        // Load JSON regions + build preview markdown
+        var jsonFile = folder.files.find(function (f) { return f.name.endsWith(".json"); });
+        if (jsonFile) {
+            fetch("/api/files/" + encodeURIComponent(stem) + "/" + encodeURIComponent(jsonFile.name))
+                .then(function (r) { return r.json(); })
+                .then(function (regions) {
+                    cvState.regions = regions;
+                    cvDrawBoxes();
+                    cvBuildMd(regions);
+                });
+        }
+
+        // Load raw .md for Raw + Full MD tabs
+        var mdFile = folder.files.find(function (f) { return f.name.endsWith(".md"); });
+        if (mdFile) {
+            fetch("/api/files/" + encodeURIComponent(stem) + "/" + encodeURIComponent(mdFile.name))
+                .then(function (r) { return r.text(); })
+                .then(function (md) {
+                    cvState.rawMd = md;
+                    var rawPre = document.getElementById("fe-cv-rawpre");
+                    if (rawPre) rawPre.textContent = md;
+                    var fullPre = document.getElementById("fe-cv-fullpre");
+                    if (fullPre) fullPre.textContent = md;
+                });
+        }
+    }
+
+    function _feType(name) {
+        if (name.endsWith(".json")) return "json";
+        if (name.endsWith(".md")) return "markdown";
+        if (/\.(png|jpg|jpeg|webp|bmp|tiff?)$/i.test(name)) return "image";
+        if (name.endsWith(".pdf")) return "pdf";
+        return "file";
+    }
+
+    function _feFileItem(stem, path, displayName, type, size) {
+        var row = document.createElement("div");
+        row.className = "fe-file";
+        var icons = { json: "\uD83D\uDCC4", markdown: "\uD83D\uDCDD", image: "\uD83D\uDDBC\uFE0F", pdf: "\uD83D\uDCD5", input: "\uD83D\uDCD5" };
+        var icon = icons[type] || "\uD83D\uDCCE";
+        var sizeStr = size ? " (" + _feFmtSize(size) + ")" : "";
+        var fileUrl = "/api/files/" + encodeURIComponent(stem) + "/" + encodeURIComponent(path);
+        row.innerHTML =
+            '<span class="fe-file-icon">' + icon + '</span>' +
+            '<span class="fe-file-name">' + escapeHtml(displayName) + sizeStr + '</span>' +
+            '<button class="fe-preview-btn">Preview</button>' +
+            '<a href="' + fileUrl + '" download class="fe-dl-btn">\u2193</a>';
+        row.querySelector(".fe-preview-btn").addEventListener("click", function () {
+            _feShowPreview(fileUrl, type, displayName);
+        });
+        return row;
+    }
+
+    function _feFmtSize(b) {
+        if (b < 1024) return b + " B";
+        if (b < 1048576) return (b / 1024).toFixed(1) + " KB";
+        return (b / 1048576).toFixed(1) + " MB";
+    }
+
+    function _feShowPreview(url, type, name) {
+        var old = document.getElementById("fe-modal");
+        if (old) old.remove();
+        var modal = document.createElement("div");
+        modal.id = "fe-modal";
+        modal.className = "fe-modal";
+        modal.innerHTML =
+            '<div class="fe-modal-header"><span>' + escapeHtml(name) + '</span><button class="fe-modal-close">&times;</button></div>' +
+            '<div class="fe-modal-body" id="fe-modal-body">Loading...</div>';
+        document.body.appendChild(modal);
+        modal.querySelector(".fe-modal-close").addEventListener("click", function () { modal.remove(); });
+        modal.addEventListener("click", function (e) { if (e.target === modal) modal.remove(); });
+        var body = document.getElementById("fe-modal-body");
+        if (type === "json") {
+            fetch(url).then(function (r) { return r.json(); }).then(function (d) {
+                body.innerHTML = '<pre class="fe-json-preview">' + escapeHtml(JSON.stringify(d, null, 2)) + '</pre>';
+            });
+        } else if (type === "markdown") {
+            fetch(url).then(function (r) { return r.text(); }).then(function (t) {
+                var html = typeof marked !== "undefined" ? marked.parse(t) : '<pre>' + escapeHtml(t) + '</pre>';
+                // Rewrite image paths: imgs/... → /api/files/{stem}/imgs/...
+                var stemMatch = url.match(/\/api\/files\/([^/]+)\//);
+                if (stemMatch) {
+                    html = html.replace(/src="(imgs\/[^"]+)"/g, 'src="/api/files/' + stemMatch[1] + '/imgs/$1"');
+                    html = html.replace(/src="imgs\//g, 'src="/api/files/' + stemMatch[1] + '/imgs/');
+                }
+                body.innerHTML = '<div class="fe-md-preview">' + html + '</div>';
+            });
+        } else if (type === "image") {
+            body.innerHTML = '<img src="' + url + '" class="fe-img-preview">';
+        } else if (type === "pdf" || type === "input") {
+            body.innerHTML = '<embed src="' + url + '" type="application/pdf" class="fe-pdf-preview">';
+        } else {
+            body.innerHTML = '<p>No preview. <a href="' + url + '" download>Download</a></p>';
+        }
+    }
+
 })();
