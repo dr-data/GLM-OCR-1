@@ -72,7 +72,7 @@
 
         {# ── Max Tokens ── #}
         <div class="ocr-setting">
-            <label>Max Tokens <span class="ocr-help" data-tip="Maximum output length per region (in tokens ≈ words).\n\n• 4096: Fast, sufficient for short paragraphs\n• 8192: Default — handles most text blocks\n• 16384: For very dense text or large tables\n• 32768: Maximum — for extremely long content\n\nHigher = can output more text but uses more memory.\nIncrease if text is being truncated mid-sentence.">?</span></label>
+            <label>Max Tokens <span class="ocr-help" data-tip="Maximum output length per region (1 token ≈ 0.75 English words).\n\n• 4096 tokens ≈ 3,000 words — a short paragraph or caption\n• 8192 tokens ≈ 6,000 words — a full page of text (default)\n• 16384 tokens ≈ 12,000 words — dense multi-column page or large table\n• 32768 tokens ≈ 24,000 words — extremely long content\n\nExamples:\n  'Hello world' = 2 tokens\n  A typical email = ~200 tokens\n  One A4 page of text = ~500-700 tokens\n  A full exam paper page = ~1,000-2,000 tokens\n\nIncrease if text is being cut off mid-sentence.\nNo speed impact — only affects max output length.">?</span></label>
             <div class="ocr-presets" data-target="ocr-max-tokens">
                 <button class="ocr-preset {{ 'active' if tokens_val <= 4096 }}" data-val="4096">Short</button>
                 <button class="ocr-preset {{ 'active' if tokens_val > 4096 and tokens_val <= 8192 }}" data-val="8192">Default</button>
