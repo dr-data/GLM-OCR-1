@@ -604,9 +604,27 @@
         }
     }
 
+    function getOcrSettings() {
+        var s = {};
+        var dpi = document.getElementById("ocr-dpi");
+        var threshold = document.getElementById("ocr-threshold");
+        var format = document.getElementById("ocr-format");
+        var maxTokens = document.getElementById("ocr-max-tokens");
+        var polygon = document.getElementById("ocr-polygon");
+        var unclip = document.getElementById("ocr-unclip");
+        if (dpi) s["pipeline.page_loader.pdf_dpi"] = parseInt(dpi.value, 10);
+        if (threshold) s["pipeline.layout.threshold"] = parseFloat(threshold.value);
+        if (format) s["pipeline.page_loader.image_format"] = format.value;
+        if (maxTokens) s["pipeline.page_loader.max_tokens"] = parseInt(maxTokens.value, 10);
+        if (polygon) s["pipeline.layout.use_polygon"] = polygon.checked;
+        if (unclip) s["pipeline.layout.layout_unclip_ratio"] = [parseFloat(unclip.value), parseFloat(unclip.value)];
+        return s;
+    }
+
     function doUpload(file) {
         var fd = new FormData();
         fd.append("file", file);
+        fd.append("ocr_settings", JSON.stringify(getOcrSettings()));
         fetch("/api/upload", { method: "POST", body: fd })
             .then(function (r) { return r.json(); })
             .then(function (data) {

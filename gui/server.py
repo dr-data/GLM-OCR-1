@@ -154,7 +154,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     # --- Page routes ------------------------------------------------------------
     @app.get("/")
     async def index():
-        return _render("index.html")
+        return _render("index.html", values=config.get_gui_values())
 
     @app.get("/settings")
     async def settings_page():
@@ -215,7 +215,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     }
 
     @app.post("/api/upload")
-    async def upload(file: UploadFile):
+    async def upload(request: Request, file: UploadFile):
         ext = Path(file.filename or "").suffix.lower()
         if ext not in _ALLOWED_EXTENSIONS:
             return JSONResponse(
@@ -223,6 +223,16 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
                           "Accepted: PDF, Word, images (png/jpg/tiff/bmp/webp)."},
                 status_code=400,
             )
+
+        # Parse optional OCR settings overrides from form data
+        form = await request.form()
+        ocr_overrides = {}
+        raw_settings = form.get("ocr_settings")
+        if raw_settings:
+            try:
+                ocr_overrides = json.loads(raw_settings)
+            except Exception:
+                pass
 
         output_dir = config.get_tui_setting("output_dir", "./output")
         upload_dir = Path(output_dir) / "uploads"
@@ -238,6 +248,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
             filename=file.filename,
             file_path=str(dest.resolve()),
         )
+        state.ocr_overrides = ocr_overrides  # type: ignore[attr-defined]
         tasks[task_id] = state
 
         asyncio.create_task(worker.run(state))

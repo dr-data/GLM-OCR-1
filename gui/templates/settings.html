@@ -84,6 +84,21 @@
         <button type="button" id="btn-clear-server-log" class="btn-clear-log hidden" title="Clear log">Clear Log</button>
     </div>
 
+    {# ── Auto-processing behavior ── #}
+    <div class="setting-section">Upload Behavior</div>
+    <div class="setting-row">
+        <label for="f-auto-process">Auto-process on upload</label>
+        <input type="checkbox" id="f-auto-process"
+               data-path="tui.auto_process" data-type="bool"
+               {% if values.get('tui.auto_process', true) %}checked{% endif %}>
+    </div>
+    <div class="setting-row">
+        <label for="f-show-settings">Show OCR settings on pipeline page</label>
+        <input type="checkbox" id="f-show-settings"
+               data-path="tui.show_ocr_settings" data-type="bool"
+               {% if values.get('tui.show_ocr_settings', false) %}checked{% endif %}>
+    </div>
+
     {# ── Processing settings (always visible) ── #}
     <div class="setting-section">Processing</div>
     <div class="setting-row">

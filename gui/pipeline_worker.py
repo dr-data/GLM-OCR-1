@@ -115,6 +115,14 @@ class PipelineWorker:
 
         sdk_kwargs = self._config.get_sdk_kwargs()
         overrides = self._config.get_pipeline_overrides()
+
+        # Apply per-upload OCR settings overrides from the UI panel
+        ocr_overrides = getattr(state, "ocr_overrides", None)
+        if ocr_overrides:
+            if not overrides:
+                overrides = {}
+            overrides.update(ocr_overrides)
+
         if overrides:
             sdk_kwargs["_dotted"] = overrides
 
