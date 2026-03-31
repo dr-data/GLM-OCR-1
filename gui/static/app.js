@@ -604,6 +604,22 @@
         }
     }
 
+    // Wire OCR help tooltips (JS-based for real newlines)
+    document.querySelectorAll(".ocr-help").forEach(function (el) {
+        var tip = null;
+        el.addEventListener("mouseenter", function () {
+            if (tip) return;
+            tip = document.createElement("div");
+            tip.className = "ocr-tooltip";
+            tip.textContent = (el.getAttribute("data-tip") || "").replace(/\\n/g, "\n");
+            el.style.position = "relative";
+            el.appendChild(tip);
+        });
+        el.addEventListener("mouseleave", function () {
+            if (tip) { tip.remove(); tip = null; }
+        });
+    });
+
     // Wire OCR preset buttons ↔ custom input sync
     document.querySelectorAll(".ocr-presets").forEach(function (row) {
         var targetId = row.getAttribute("data-target");
