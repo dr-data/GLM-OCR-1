@@ -176,3 +176,9 @@ data/
 /apps/frontend/dist/
 *.pid
 .DS_Store
+
+# Local tooling
+.mcp.json
+.playwright-mcp/
+.server_venvs/
+.spec-workflow/

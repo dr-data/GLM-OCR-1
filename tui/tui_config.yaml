@@ -1,0 +1,26 @@
+pipeline:
+  maas:
+    enabled: true
+    api_key: null
+    api_url: https://open.bigmodel.cn/api/paas/v4/layout_parsing
+    model: glm-ocr
+    request_timeout: 300
+  ocr_api:
+    api_host: 127.0.0.1
+    api_port: 8080
+    model: glm-ocr
+  page_loader:
+    pdf_dpi: 200
+  layout:
+    threshold: 0.3
+  result_formatter:
+    enable_merge_formula_numbers: true
+    enable_merge_text_blocks: true
+    enable_format_bullet_points: true
+  max_workers: 16
+logging:
+  level: INFO
+tui:
+  output_dir: ./output
+  convert_html_tables: true
+  save_images: true
