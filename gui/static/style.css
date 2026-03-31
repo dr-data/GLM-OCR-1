@@ -1,18 +1,57 @@
-/* GLM-OCR Web GUI — Dark Terminal Theme */
+/* ==========================================================
+   GLM-OCR GUI — Stylesheet
+   ==========================================================
+   1. Variables & Reset
+   2. Layout (header, nav, main, footer)
+   3. Server Status Bar
+   4. Upload Zone
+   5. OCR Settings Panel
+   6. Pipeline Stages
+   7. Progress Bars
+   8. Batch List
+   9. Log Panels
+   10. Output Section (comparison view)
+   11. PDF Viewer
+   12. Region Overlays & Hover
+   13. Markdown Preview
+   14. Settings Page
+   15. File Explorer
+   16. Modals
+   17. Utilities
+   ========================================================== */
+
+
+/* ----------------------------------------------------------
+   1. Variables & Reset
+   ---------------------------------------------------------- */
 
 :root {
+    /* Background */
     --bg-primary: #0a0a0a;
     --bg-secondary: #111111;
     --bg-hover: #1a1a1a;
+    --bg-dark: #222222;
+
+    /* Text */
     --text-primary: #e0e0e0;
     --text-muted: #666666;
+    --text-secondary: rgba(255, 255, 255, 0.6);
+
+    /* Accents */
     --accent-green: #00ff88;
     --accent-cyan: #00cccc;
     --accent-red: #ff4444;
     --accent-yellow: #ffcc00;
+
+    /* Borders & Misc */
     --border: #333333;
     --font-mono: "SF Mono", "Fira Code", "Cascadia Code", "Consolas", monospace;
     --radius: 2px;
+
+    /* Dimension tokens */
+    --pdf-container-height: 660px;
+    --log-max-height: 250px;
+    --batch-comparison-height: 500px;
 }
 
 *, *::before, *::after {
@@ -31,7 +70,10 @@ body {
     padding-bottom: 48px;
 }
 
-/* ── Header / Nav ────────────────────────── */
+
+/* ----------------------------------------------------------
+   2. Layout (header, nav, main, footer)
+   ---------------------------------------------------------- */
 
 header {
     border-bottom: 1px solid var(--border);
@@ -64,8 +106,6 @@ nav a:hover, nav a.active {
     color: var(--accent-cyan);
 }
 
-/* ── Main Content ────────────────────────── */
-
 main {
     max-width: 960px;
     margin: 0 auto;
@@ -85,7 +125,23 @@ h2 {
     color: var(--text-muted);
 }
 
-/* ── Server Status Bar ───────────────────── */
+footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border);
+    padding: 8px 16px;
+    text-align: center;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+
+/* ----------------------------------------------------------
+   3. Server Status Bar
+   ---------------------------------------------------------- */
 
 .server-bar {
     display: flex;
@@ -168,7 +224,10 @@ h2 {
     color: var(--accent-cyan);
 }
 
-/* ── Upload Zone ─────────────────────────── */
+
+/* ----------------------------------------------------------
+   4. Upload Zone
+   ---------------------------------------------------------- */
 
 .upload-zone {
     border: 1px dashed var(--border);
@@ -199,7 +258,10 @@ h2 {
     font-size: 13px;
 }
 
-/* ── OCR Settings Panel ──────────────────── */
+
+/* ----------------------------------------------------------
+   5. OCR Settings Panel
+   ---------------------------------------------------------- */
 
 .ocr-settings-panel {
     max-width: 700px;
@@ -382,7 +444,10 @@ h2 {
     opacity: 0.85;
 }
 
-/* ── Pipeline Visualization ──────────────── */
+
+/* ----------------------------------------------------------
+   6. Pipeline Stages
+   ---------------------------------------------------------- */
 
 .pipeline {
     display: flex;
@@ -435,7 +500,10 @@ h2 {
     user-select: none;
 }
 
-/* ── Progress Bar ────────────────────────── */
+
+/* ----------------------------------------------------------
+   7. Progress Bars
+   ---------------------------------------------------------- */
 
 .progress-bar-wrap {
     padding: 8px 0 16px;
@@ -472,7 +540,10 @@ h2 {
     opacity: 0.8;
 }
 
-/* ── Batch List ──────────────────────────── */
+
+/* ----------------------------------------------------------
+   8. Batch List
+   ---------------------------------------------------------- */
 
 details.batch-item {
     border: 1px solid var(--border);
@@ -498,7 +569,7 @@ details.batch-item summary {
 details.batch-item summary::-webkit-details-marker { display: none; }
 
 details.batch-item summary::before {
-    content: "▶";
+    content: "\25B6";
     font-size: 10px;
     color: var(--text-muted);
     transition: transform 0.15s;
@@ -583,7 +654,7 @@ details.batch-item[open] summary::before {
 }
 
 .batch-comparison .pdf-preview-container {
-    height: 500px;
+    height: var(--batch-comparison-height);
 }
 
 .batch-comparison .pdf-canvas-wrap {
@@ -613,7 +684,12 @@ details.batch-item[open] summary::before {
     color: var(--text-primary);
 }
 
-/* ── Log Panel (settings page — collapsible) ── */
+
+/* ----------------------------------------------------------
+   9. Log Panels
+   ---------------------------------------------------------- */
+
+/* Log panel — settings page (collapsible) */
 
 .log-panel details {
     margin-top: 24px;
@@ -645,7 +721,7 @@ details.batch-item[open] summary::before {
     color: var(--text-muted);
 }
 
-/* ── Log Section (main page — collapsible) ── */
+/* Log section — main page (collapsible) */
 
 #log-section {
     margin-top: 16px;
@@ -688,7 +764,7 @@ details.batch-item[open] summary::before {
 }
 
 #log-section .log-content {
-    max-height: 250px;
+    max-height: var(--log-max-height);
     overflow-y: auto;
     padding: 10px 14px;
     font-size: 12px;
@@ -704,7 +780,10 @@ details.batch-item[open] summary::before {
 .log-entry.warning { color: var(--accent-yellow); }
 .log-entry.info { color: var(--text-muted); }
 
-/* ── Output Section ──────────────────────── */
+
+/* ----------------------------------------------------------
+   10. Output Section (comparison view)
+   ---------------------------------------------------------- */
 
 .output-section {
     margin-top: 16px;
@@ -723,7 +802,7 @@ details.batch-item[open] summary::before {
     margin-bottom: 8px;
 }
 
-/* ── Comparison View (side-by-side) ───────── */
+/* Layout toggle */
 .layout-toggle-bar {
     display: flex;
     justify-content: flex-end;
@@ -747,6 +826,7 @@ details.batch-item[open] summary::before {
     border-color: var(--accent-cyan);
 }
 
+/* Side-by-side comparison */
 .comparison-view {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -768,88 +848,7 @@ details.batch-item[open] summary::before {
     min-width: 0;
 }
 
-.pdf-preview-container {
-    background: #333;
-    overflow: hidden;
-    height: 660px;
-}
-
-.pdf-controls {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    padding: 6px;
-    background: var(--bg-primary);
-    border-bottom: 1px solid var(--border);
-    font-family: var(--font-mono);
-    font-size: 12px;
-    color: var(--text-muted);
-}
-
-.pdf-controls button {
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--text-muted);
-    padding: 2px 10px;
-    border-radius: var(--radius);
-    cursor: pointer;
-    font-family: var(--font-mono);
-    font-size: 14px;
-}
-
-.pdf-controls button:hover {
-    color: var(--accent-cyan);
-    border-color: var(--accent-cyan);
-}
-
-.pdf-controls-sep {
-    color: var(--border);
-}
-
-.pdf-canvas-wrap {
-    position: relative;
-    overflow: auto;
-    height: calc(100% - 36px);
-    display: flex;
-    justify-content: center;
-    align-items: flex-start;
-    background: #222;
-}
-
-#pdf-canvas {
-    display: block;
-}
-
-.pdf-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    pointer-events: none;
-}
-
-.pdf-overlay .region-rect {
-    position: absolute;
-    border: var(--box-border-width, 2px) solid var(--box-outline, rgba(0, 204, 204, 0.3));
-    background: var(--box-fill, rgba(0, 204, 204, 0.05));
-    pointer-events: auto;
-    cursor: pointer;
-    transition: background 0.15s, border-color 0.15s;
-    border-radius: 2px;
-}
-
-.pdf-overlay .region-rect:hover,
-.pdf-overlay .region-rect.active {
-    border-color: var(--box-outline-active, rgba(0, 204, 204, 0.8));
-    background: var(--box-fill-active, rgba(0, 204, 204, 0.15));
-}
-
-.pdf-overlay .region-rect.copied {
-    border-color: var(--accent-green, #00ff88);
-    background: rgba(0, 255, 136, 0.2);
-}
-
-/* ── Collapsible Compare Panels ───────────── */
+/* Collapsible compare panels */
 .compare-detail {
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -893,6 +892,7 @@ details.batch-item[open] summary::before {
     border-bottom: 1px solid var(--border);
 }
 
+/* Output tabs (inline) */
 .output-tabs-inline {
     margin-left: auto;
     display: flex;
@@ -935,15 +935,21 @@ details.batch-item[open] summary::before {
     color: var(--accent-cyan);
 }
 
-/* ── Output Header (legacy, kept for non-comparison contexts) ── */
+/* Output actions */
+.output-actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
 
+/* Output panel (legacy, kept for non-comparison contexts) */
 .output-panel {
     max-height: 600px;
     overflow-y: auto;
     margin-bottom: 12px;
 }
 
-/* ── Raw preview ─────────────────────────────── */
+/* Raw preview */
 .output-preview {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
@@ -958,135 +964,99 @@ details.batch-item[open] summary::before {
     margin: 0;
 }
 
-/* ── Rendered markdown preview ───────────────── */
-.md-preview {
-    background: var(--bg-secondary);
+
+/* ----------------------------------------------------------
+   11. PDF Viewer
+   ---------------------------------------------------------- */
+
+.pdf-preview-container {
+    background: var(--border);
+    overflow: hidden;
+    height: var(--pdf-container-height);
+}
+
+.pdf-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 6px;
+    background: var(--bg-primary);
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.pdf-controls button {
+    background: transparent;
     border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 2px 10px;
     border-radius: var(--radius);
-    padding: 20px 24px;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    font-size: 15px;
-    line-height: 1.7;
-    color: var(--text-primary);
-}
-
-.md-preview h1 {
-    font-size: 1.8em;
-    font-weight: 600;
-    margin: 0 0 12px 0;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--border);
-    color: #ffffff;
-}
-
-.md-preview h2 {
-    font-size: 1.4em;
-    font-weight: 600;
-    margin: 24px 0 8px 0;
-    padding-bottom: 6px;
-    border-bottom: 1px solid var(--border);
-    color: #f0f0f0;
-}
-
-.md-preview h3 {
-    font-size: 1.15em;
-    font-weight: 600;
-    margin: 20px 0 6px 0;
-    color: #e0e0e0;
-}
-
-.md-preview p {
-    margin: 0 0 12px 0;
-}
-
-.md-preview ul, .md-preview ol {
-    margin: 0 0 12px 0;
-    padding-left: 24px;
-}
-
-.md-preview li {
-    margin-bottom: 4px;
-}
-
-.md-preview table {
-    border-collapse: collapse;
-    width: 100%;
-    margin: 12px 0;
+    cursor: pointer;
+    font-family: var(--font-mono);
     font-size: 14px;
 }
 
-.md-preview th, .md-preview td {
-    border: 1px solid var(--border);
-    padding: 8px 12px;
-    text-align: left;
-}
-
-.md-preview th {
-    background: #1a1a1a;
-    font-weight: 600;
+.pdf-controls button:hover {
     color: var(--accent-cyan);
+    border-color: var(--accent-cyan);
 }
 
-.md-preview tr:nth-child(even) {
-    background: rgba(255,255,255,0.02);
+.pdf-controls-sep {
+    color: var(--border);
 }
 
-.md-preview code {
-    background: #1a1a1a;
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    padding: 2px 5px;
-    font-family: var(--font-mono);
-    font-size: 0.9em;
-    color: var(--accent-cyan);
+.pdf-canvas-wrap {
+    position: relative;
+    overflow: auto;
+    height: calc(100% - 36px);
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    background: var(--bg-dark);
 }
 
-.md-preview pre {
-    background: #0d0d0d;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 14px 16px;
-    overflow-x: auto;
-    margin: 12px 0;
+#pdf-canvas {
+    display: block;
 }
 
-.md-preview pre code {
-    background: none;
-    border: none;
-    padding: 0;
-    font-size: 13px;
-    color: var(--text-primary);
+
+/* ----------------------------------------------------------
+   12. Region Overlays & Hover
+   ---------------------------------------------------------- */
+
+/* PDF overlay region rectangles */
+.pdf-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
 }
 
-.md-preview blockquote {
-    border-left: 3px solid var(--accent-cyan);
-    margin: 12px 0;
-    padding: 4px 16px;
-    color: var(--text-muted);
-    background: rgba(0,204,204,0.05);
+.pdf-overlay .region-rect {
+    position: absolute;
+    border: var(--box-border-width, 2px) solid var(--box-outline, rgba(0, 204, 204, 0.3));
+    background: var(--box-fill, rgba(0, 204, 204, 0.05));
+    pointer-events: auto;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+    border-radius: 2px;
 }
 
-.md-preview img {
-    max-width: 100%;
-    height: auto;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    margin: 8px 0;
+.pdf-overlay .region-rect:hover,
+.pdf-overlay .region-rect.active {
+    border-color: var(--box-outline-active, rgba(0, 204, 204, 0.8));
+    background: var(--box-fill-active, rgba(0, 204, 204, 0.15));
 }
 
-.md-preview hr {
-    border: none;
-    border-top: 1px solid var(--border);
-    margin: 20px 0;
+.pdf-overlay .region-rect.copied {
+    border-color: var(--accent-green, #00ff88);
+    background: rgba(0, 255, 136, 0.2);
 }
 
-/* KaTeX math */
-.md-preview .katex-display {
-    margin: 12px 0;
-    overflow-x: auto;
-}
-
-/* ── Region Highlight System ─────────────── */
+/* Markdown region highlight system */
 .page-section {
     position: relative;
     padding-top: 4px;
@@ -1152,13 +1122,142 @@ details.batch-item[open] summary::before {
     opacity: 1;
 }
 
-.output-actions {
-    display: flex;
-    gap: 12px;
-    align-items: center;
+
+/* ----------------------------------------------------------
+   13. Markdown Preview
+   ---------------------------------------------------------- */
+
+.md-preview {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.7;
+    color: var(--text-primary);
 }
 
-/* ── Settings ────────────────────────────── */
+.md-preview h1 {
+    font-size: 1.8em;
+    font-weight: 600;
+    margin: 0 0 12px 0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    color: #ffffff;
+}
+
+.md-preview h2 {
+    font-size: 1.4em;
+    font-weight: 600;
+    margin: 24px 0 8px 0;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+    color: #f0f0f0;
+}
+
+.md-preview h3 {
+    font-size: 1.15em;
+    font-weight: 600;
+    margin: 20px 0 6px 0;
+    color: var(--text-primary);
+}
+
+.md-preview p {
+    margin: 0 0 12px 0;
+}
+
+.md-preview ul, .md-preview ol {
+    margin: 0 0 12px 0;
+    padding-left: 24px;
+}
+
+.md-preview li {
+    margin-bottom: 4px;
+}
+
+.md-preview table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 12px 0;
+    font-size: 14px;
+}
+
+.md-preview th, .md-preview td {
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    text-align: left;
+}
+
+.md-preview th {
+    background: var(--bg-hover);
+    font-weight: 600;
+    color: var(--accent-cyan);
+}
+
+.md-preview tr:nth-child(even) {
+    background: rgba(255,255,255,0.02);
+}
+
+.md-preview code {
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 2px 5px;
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    color: var(--accent-cyan);
+}
+
+.md-preview pre {
+    background: #0d0d0d;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 12px 0;
+}
+
+.md-preview pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.md-preview blockquote {
+    border-left: 3px solid var(--accent-cyan);
+    margin: 12px 0;
+    padding: 4px 16px;
+    color: var(--text-muted);
+    background: rgba(0,204,204,0.05);
+}
+
+.md-preview img {
+    max-width: 100%;
+    height: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin: 8px 0;
+}
+
+.md-preview hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 20px 0;
+}
+
+/* KaTeX math */
+.md-preview .katex-display {
+    margin: 12px 0;
+    overflow-x: auto;
+}
+
+
+/* ----------------------------------------------------------
+   14. Settings Page
+   ---------------------------------------------------------- */
 
 .setting-section {
     font-size: 12px;
@@ -1220,8 +1319,7 @@ details.batch-item[open] summary::before {
     height: 16px;
 }
 
-/* ── Server Controls ─────────────────────── */
-
+/* Server controls */
 .server-controls {
     display: flex;
     gap: 8px;
@@ -1249,16 +1347,12 @@ details.batch-item[open] summary::before {
     color: var(--accent-yellow);
 }
 
-.server-status.installing {
-    color: var(--accent-cyan);
-}
-
+.server-status.installing,
 .server-status.starting {
     color: var(--accent-cyan);
 }
 
-/* ── Install Button ─────────────────────── */
-
+/* Install button */
 .btn-install {
     color: var(--accent-yellow);
     border-color: var(--accent-yellow);
@@ -1276,8 +1370,7 @@ details.batch-item[open] summary::before {
     cursor: wait;
 }
 
-/* ── Server Notes ───────────────────────── */
-
+/* Server notes */
 .server-note {
     font-size: 12px;
     color: var(--accent-yellow);
@@ -1289,8 +1382,7 @@ details.batch-item[open] summary::before {
     flex-wrap: wrap;
 }
 
-/* ── Server Log Output ──────────────────── */
-
+/* Server log output */
 .server-log-output {
     background: var(--bg-primary);
     border: 1px solid var(--border);
@@ -1323,8 +1415,7 @@ details.batch-item[open] summary::before {
     border-color: var(--accent-red);
 }
 
-/* ── Log Button ─────────────────────────── */
-
+/* Log button */
 .btn-logs {
     font-size: 11px;
     padding: 4px 8px;
@@ -1338,8 +1429,26 @@ details.batch-item[open] summary::before {
     background: transparent;
 }
 
-/* ── Buttons ─────────────────────────────── */
 
+/* ----------------------------------------------------------
+   15. File Explorer
+   ---------------------------------------------------------- */
+
+/* (reserved for future use) */
+
+
+/* ----------------------------------------------------------
+   16. Modals
+   ---------------------------------------------------------- */
+
+/* (reserved for future use) */
+
+
+/* ----------------------------------------------------------
+   17. Utilities
+   ---------------------------------------------------------- */
+
+/* Base button reset */
 button {
     font-family: var(--font-mono);
     font-size: 13px;
@@ -1366,23 +1475,6 @@ button:disabled {
     font-size: 13px;
     margin-left: 12px;
 }
-
-/* ── Footer ──────────────────────────────── */
-
-footer {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background: var(--bg-secondary);
-    border-top: 1px solid var(--border);
-    padding: 8px 16px;
-    text-align: center;
-    font-size: 11px;
-    color: var(--text-muted);
-}
-
-/* ── Utility ─────────────────────────────── */
 
 .hidden {
     display: none;

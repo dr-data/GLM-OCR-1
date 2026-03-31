@@ -307,13 +307,7 @@
             if (panel) panel.style.display = "";
             var img = new Image();
             img.onload = function () {
-                if (pdfCanvas) {
-                    var maxW = pdfCanvasWrap ? pdfCanvasWrap.clientWidth - 20 : 500;
-                    var scale = Math.min(maxW / img.width, 1);
-                    pdfCanvas.width = img.width * scale;
-                    pdfCanvas.height = img.height * scale;
-                    pdfCanvas.getContext("2d").drawImage(img, 0, 0, pdfCanvas.width, pdfCanvas.height);
-                }
+                if (mainViewer) mainViewer.renderImage(img);
             };
             img.src = URL.createObjectURL(file);
         }
@@ -413,12 +407,7 @@
         }, 2000);
     }
 
-    // ── PDF.js Viewer ──────────────────────────
-    var pdfDoc = null;
-    var pdfCurrentPage = 1;
-    var pdfTotalPages = 0;
-    var pdfScale = 1.0;
-    var pdfZoomLevel = 1.0;
+    // ── PDF.js Viewer (via PdfViewer class) ──────────────────────────
     var pdfCanvas = document.getElementById("pdf-canvas");
     var pdfOverlay = document.getElementById("pdf-overlay");
     var pdfCanvasWrap = document.getElementById("pdf-canvas-wrap");
@@ -429,171 +418,55 @@
     var pdfZoomIn = document.getElementById("pdf-zoom-in");
     var pdfZoomOut = document.getElementById("pdf-zoom-out");
 
-    function loadPdf(url) {
-        if (typeof pdfjsLib === "undefined") {
-            console.error("PDF.js not loaded");
-            return;
-        }
-        pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-
-        pdfjsLib.getDocument(url).promise.then(function (doc) {
-            pdfDoc = doc;
-            pdfTotalPages = doc.numPages;
-            pdfCurrentPage = 1;
-            updatePageInfo();
-            renderPdfPage(pdfCurrentPage);
-        }).catch(function (err) {
-            console.error("PDF.js load error:", err);
-        });
-    }
-
-    function renderPdfPage(pageNum) {
-        if (!pdfDoc || !pdfCanvas) return;
-        pdfDoc.getPage(pageNum).then(function (page) {
-            var containerWidth = pdfCanvasWrap ? pdfCanvasWrap.clientWidth - 20 : 500;
-            var containerHeight = pdfCanvasWrap ? pdfCanvasWrap.clientHeight - 20 : 700;
-            var unscaledViewport = page.getViewport({ scale: 1 });
-            var scaleByWidth = containerWidth / unscaledViewport.width;
-            var scaleByHeight = containerHeight / unscaledViewport.height;
-            var baseScale = Math.min(scaleByWidth, scaleByHeight);
-            pdfScale = baseScale * pdfZoomLevel;
-            var viewport = page.getViewport({ scale: pdfScale });
-
-            pdfCanvas.width = viewport.width;
-            pdfCanvas.height = viewport.height;
-
-            var ctx = pdfCanvas.getContext("2d");
-            page.render({ canvasContext: ctx, viewport: viewport }).promise.then(function () {
-                // Position overlay exactly on top of the canvas
-                // (canvas may be centered by flex, so read its actual offset)
-                if (pdfOverlay && pdfCanvasWrap) {
-                    var canvasRect = pdfCanvas.getBoundingClientRect();
-                    var wrapRect = pdfCanvasWrap.getBoundingClientRect();
-                    pdfOverlay.style.left = (canvasRect.left - wrapRect.left + pdfCanvasWrap.scrollLeft) + "px";
-                    pdfOverlay.style.top = (canvasRect.top - wrapRect.top + pdfCanvasWrap.scrollTop) + "px";
-                    pdfOverlay.style.width = pdfCanvas.width + "px";
-                    pdfOverlay.style.height = pdfCanvas.height + "px";
-                }
-                drawPageRegions(pageNum - 1);
+    var mainViewer = (typeof PdfViewer !== "undefined" && pdfCanvas) ? new PdfViewer({
+        canvas: pdfCanvas,
+        overlay: pdfOverlay,
+        wrap: pdfCanvasWrap,
+        onRegionHover: function (pageIdx, regionIdx) {
+            // PDF box → markdown highlight
+            if (!mdPreview) return;
+            var mdBlock = mdPreview.querySelector(
+                '.region-block[data-page="' + pageIdx + '"][data-region="' + regionIdx + '"]'
+            );
+            if (mdBlock) {
+                mdBlock.classList.add("region-hover");
+                mdBlock.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+        },
+        onRegionLeave: function () {
+            if (!mdPreview) return;
+            mdPreview.querySelectorAll(".region-hover").forEach(function (el) {
+                el.classList.remove("region-hover");
             });
-        });
+        },
+        onPageChange: function (info) {
+            if (pdfPageInfo) pdfPageInfo.textContent = info.current + " / " + info.total;
+        },
+        onZoomChange: function (text) {
+            if (pdfZoomInfo) pdfZoomInfo.textContent = text;
+        },
+    }) : null;
+
+    if (pdfPrev) pdfPrev.addEventListener("click", function () { if (mainViewer) mainViewer.prevPage(); });
+    if (pdfNext) pdfNext.addEventListener("click", function () { if (mainViewer) mainViewer.nextPage(); });
+    if (pdfZoomIn) pdfZoomIn.addEventListener("click", function () { if (mainViewer) mainViewer.zoomIn(); });
+    if (pdfZoomOut) pdfZoomOut.addEventListener("click", function () { if (mainViewer) mainViewer.zoomOut(); });
+
+    // Compatibility wrappers used by the rest of app.js
+    function loadPdf(url) {
+        if (mainViewer) mainViewer.loadUrl(url);
     }
-
-    function updatePageInfo() {
-        if (pdfPageInfo) {
-            pdfPageInfo.textContent = pdfCurrentPage + " / " + pdfTotalPages;
-        }
-    }
-
-    function goToPdfPage(n) {
-        if (!pdfDoc) return;
-        if (n < 1) n = 1;
-        if (n > pdfTotalPages) n = pdfTotalPages;
-        pdfCurrentPage = n;
-        updatePageInfo();
-        renderPdfPage(n);
-    }
-
-    if (pdfPrev) pdfPrev.addEventListener("click", function () { goToPdfPage(pdfCurrentPage - 1); });
-    if (pdfNext) pdfNext.addEventListener("click", function () { goToPdfPage(pdfCurrentPage + 1); });
-
-    function updateZoomInfo() {
-        if (pdfZoomInfo) pdfZoomInfo.textContent = Math.round(pdfZoomLevel * 100) + "%";
-    }
-    if (pdfZoomIn) pdfZoomIn.addEventListener("click", function () {
-        pdfZoomLevel = Math.min(pdfZoomLevel + 0.25, 3.0);
-        updateZoomInfo();
-        renderPdfPage(pdfCurrentPage);
-    });
-    if (pdfZoomOut) pdfZoomOut.addEventListener("click", function () {
-        pdfZoomLevel = Math.max(pdfZoomLevel - 0.25, 0.5);
-        updateZoomInfo();
-        renderPdfPage(pdfCurrentPage);
-    });
-
-    // Region overlay drawing (called by highlight sync system)
-    var currentPageRegions = {};
 
     function setRegionData(data) {
-        currentPageRegions = {};
-        if (!data) return;
-        for (var p = 0; p < data.length; p++) {
-            currentPageRegions[p] = (data[p] || []).map(function (r, i) {
-                return {
-                    bbox_2d: r.bbox_2d,
-                    label: r.label || r.task_type,
-                    content: r.content,
-                    regionIdx: r.index != null ? r.index : i,
-                };
-            });
-        }
-        if (pdfDoc) drawPageRegions(pdfCurrentPage - 1);
-    }
-
-    function drawPageRegions(pageIdx) {
-        if (!pdfOverlay) return;
-        pdfOverlay.innerHTML = "";
-        var regions = currentPageRegions[pageIdx];
-        if (!regions || !pdfCanvas) return;
-
-        var cw = pdfCanvas.width;
-        var ch = pdfCanvas.height;
-
-        regions.forEach(function (r) {
-            if (!r.bbox_2d || r.bbox_2d.length < 4) return;
-            var x1 = (r.bbox_2d[0] / 1000) * cw;
-            var y1 = (r.bbox_2d[1] / 1000) * ch;
-            var x2 = (r.bbox_2d[2] / 1000) * cw;
-            var y2 = (r.bbox_2d[3] / 1000) * ch;
-
-            var rect = document.createElement("div");
-            rect.className = "region-rect";
-            rect.style.left = x1 + "px";
-            rect.style.top = y1 + "px";
-            rect.style.width = (x2 - x1) + "px";
-            rect.style.height = (y2 - y1) + "px";
-            rect.setAttribute("data-page", pageIdx);
-            rect.setAttribute("data-region", r.regionIdx);
-            rect.title = (r.label || "region") + " — click to copy";
-
-            // Click to copy region content
-            (function (content) {
-                rect.addEventListener("click", function () {
-                    if (!content) return;
-                    navigator.clipboard.writeText(content.trim()).then(function () {
-                        rect.classList.add("copied");
-                        setTimeout(function () { rect.classList.remove("copied"); }, 800);
-                    });
-                });
-            })(r.content);
-
-            pdfOverlay.appendChild(rect);
-        });
+        if (mainViewer) mainViewer.setRegions(data);
     }
 
     function highlightPdfRegion(pageIdx, regionIdx) {
-        if (pdfCurrentPage !== pageIdx + 1) {
-            goToPdfPage(pageIdx + 1);
-            setTimeout(function () { _activatePdfRect(regionIdx); }, 300);
-        } else {
-            _activatePdfRect(regionIdx);
-        }
-    }
-
-    function _activatePdfRect(regionIdx) {
-        if (!pdfOverlay) return;
-        pdfOverlay.querySelectorAll(".region-rect.active").forEach(function (el) {
-            el.classList.remove("active");
-        });
-        var target = pdfOverlay.querySelector('.region-rect[data-region="' + regionIdx + '"]');
-        if (target) target.classList.add("active");
+        if (mainViewer) mainViewer.highlightRegion(regionIdx, pageIdx);
     }
 
     function clearPdfHighlight() {
-        if (!pdfOverlay) return;
-        pdfOverlay.querySelectorAll(".region-rect.active").forEach(function (el) {
-            el.classList.remove("active");
-        });
+        if (mainViewer) mainViewer.clearHighlight();
     }
 
     function showPdfPreview(filename) {
@@ -604,70 +477,16 @@
         }
     }
 
-    // Wire OCR help tooltips (JS-based for real newlines)
-    document.querySelectorAll(".ocr-help").forEach(function (el) {
-        var tip = null;
-        el.addEventListener("mouseenter", function () {
-            if (tip) return;
-            tip = document.createElement("div");
-            tip.className = "ocr-tooltip";
-            tip.textContent = (el.getAttribute("data-tip") || "").replace(/\\n/g, "\n");
-            el.style.position = "relative";
-            el.appendChild(tip);
-        });
-        el.addEventListener("mouseleave", function () {
-            if (tip) { tip.remove(); tip = null; }
-        });
-    });
-
-    // Wire OCR preset buttons ↔ custom input sync
-    document.querySelectorAll(".ocr-presets").forEach(function (row) {
-        var targetId = row.getAttribute("data-target");
-        var input = document.getElementById(targetId);
-        if (!input) return;
-        row.querySelectorAll(".ocr-preset").forEach(function (btn) {
-            btn.addEventListener("click", function () {
-                row.querySelectorAll(".ocr-preset").forEach(function (b) { b.classList.remove("active"); });
-                btn.classList.add("active");
-                input.value = btn.getAttribute("data-val");
-                // Trigger change event for selects
-                if (input.tagName === "SELECT") {
-                    input.dispatchEvent(new Event("change"));
-                }
-            });
-        });
-        // Sync: when custom input changes, update active preset
-        input.addEventListener("input", function () {
-            var val = input.value;
-            row.querySelectorAll(".ocr-preset").forEach(function (b) {
-                b.classList.toggle("active", b.getAttribute("data-val") === val);
-            });
-        });
-    });
-
-    function getOcrSettings() {
-        var s = {};
-        var dpi = document.getElementById("ocr-dpi");
-        var threshold = document.getElementById("ocr-threshold");
-        var format = document.getElementById("ocr-format");
-        var maxTokens = document.getElementById("ocr-max-tokens");
-        var polygon = document.getElementById("ocr-polygon");
-        var unclip = document.getElementById("ocr-unclip");
-        var repPenalty = document.getElementById("ocr-rep-penalty");
-        if (dpi) s["pipeline.page_loader.pdf_dpi"] = parseInt(dpi.value, 10);
-        if (threshold) s["pipeline.layout.threshold"] = parseFloat(threshold.value);
-        if (format) s["pipeline.page_loader.image_format"] = format.value;
-        if (maxTokens) s["pipeline.page_loader.max_tokens"] = parseInt(maxTokens.value, 10);
-        if (polygon) s["pipeline.layout.use_polygon"] = polygon.value === "true";
-        if (unclip) s["pipeline.layout.layout_unclip_ratio"] = [parseFloat(unclip.value), parseFloat(unclip.value)];
-        if (repPenalty) s["pipeline.page_loader.repetition_penalty"] = parseFloat(repPenalty.value);
-        return s;
+    // OCR settings — wired via extracted module
+    if (typeof OcrSettings !== "undefined") {
+        OcrSettings.wireTooltips();
+        OcrSettings.wirePresets();
     }
 
     function doUpload(file) {
         var fd = new FormData();
         fd.append("file", file);
-        fd.append("ocr_settings", JSON.stringify(getOcrSettings()));
+        fd.append("ocr_settings", JSON.stringify(typeof OcrSettings !== "undefined" ? OcrSettings.read() : {}));
         fetch("/api/upload", { method: "POST", body: fd })
             .then(function (r) { return r.json(); })
             .then(function (data) {
@@ -749,53 +568,59 @@
             });
     }
 
-    // Per-batch-file state: {pdfDoc, currentPage, totalPages, zoomLevel, markdown}
+    // Per-batch-file state: {viewer (PdfViewer), markdown, fileStem}
     var batchFileState = {};
 
+    // Store per-batch region data separately (not on global state)
+    var batchRegionData = {};
+
     function initBatchFileUI(idx) {
-        var s = batchFileState[idx] = { pdfDoc: null, page: 1, total: 0, zoom: 1.0, markdown: "" };
         var canvas = document.getElementById("bp-canvas-" + idx);
         var wrap = document.getElementById("bp-wrap-" + idx);
         var overlay = document.getElementById("bp-overlay-" + idx);
+        var mdEl = document.getElementById("bp-md-" + idx);
 
-        function render() {
-            if (!s.pdfDoc || !canvas) return;
-            s.pdfDoc.getPage(s.page).then(function (page) {
-                var cw = (wrap && wrap.clientWidth > 40) ? wrap.clientWidth - 20 : 500;
-                var ch = (wrap && wrap.clientHeight > 40) ? wrap.clientHeight - 20 : 500;
-                var vp0 = page.getViewport({ scale: 1 });
-                var base = Math.min(cw / vp0.width, ch / vp0.height);
-                var sc = base * s.zoom;
-                var vp = page.getViewport({ scale: sc });
-                canvas.width = vp.width;
-                canvas.height = vp.height;
-                page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise.then(function () {
-                    if (overlay && wrap) {
-                        var cr = canvas.getBoundingClientRect();
-                        var wr = wrap.getBoundingClientRect();
-                        overlay.style.left = (cr.left - wr.left + wrap.scrollLeft) + "px";
-                        overlay.style.top = (cr.top - wr.top + wrap.scrollTop) + "px";
-                        overlay.style.width = canvas.width + "px";
-                        overlay.style.height = canvas.height + "px";
-                    }
-                    drawBatchRegions(idx);
+        var viewer = (typeof PdfViewer !== "undefined" && canvas) ? new PdfViewer({
+            canvas: canvas,
+            overlay: overlay,
+            wrap: wrap,
+            onRegionHover: function (pageIdx, regionIdx) {
+                if (!mdEl) return;
+                var mdBlock = mdEl.querySelector(
+                    '.region-block[data-page="' + pageIdx + '"][data-region="' + regionIdx + '"]'
+                );
+                if (mdBlock) {
+                    mdBlock.classList.add("region-hover");
+                    mdBlock.scrollIntoView({ behavior: "smooth", block: "center" });
+                }
+            },
+            onRegionLeave: function () {
+                if (!mdEl) return;
+                mdEl.querySelectorAll(".region-hover").forEach(function (el) {
+                    el.classList.remove("region-hover");
                 });
-            });
-            var pi = document.getElementById("bp-page-" + idx);
-            if (pi) pi.textContent = s.page + " / " + s.total;
-            var zi = document.getElementById("bp-zoom-" + idx);
-            if (zi) zi.textContent = Math.round(s.zoom * 100) + "%";
-        }
+            },
+            onPageChange: function (info) {
+                var pi = document.getElementById("bp-page-" + idx);
+                if (pi) pi.textContent = info.current + " / " + info.total;
+            },
+            onZoomChange: function (text) {
+                var zi = document.getElementById("bp-zoom-" + idx);
+                if (zi) zi.textContent = text;
+            },
+        }) : null;
 
-        // Page nav
+        var s = batchFileState[idx] = { viewer: viewer, markdown: "", fileStem: "" };
+
+        // Page nav + tabs + copy (event delegation)
         var item = document.getElementById("batch-item-" + idx);
         if (item) {
             item.addEventListener("click", function (e) {
                 var btn = e.target;
-                if (btn.classList.contains("bp-prev")) { if (s.page > 1) { s.page--; render(); } }
-                else if (btn.classList.contains("bp-next")) { if (s.page < s.total) { s.page++; render(); } }
-                else if (btn.classList.contains("bp-zin")) { s.zoom = Math.min(s.zoom + 0.25, 3.0); render(); }
-                else if (btn.classList.contains("bp-zout")) { s.zoom = Math.max(s.zoom - 0.25, 0.5); render(); }
+                if (btn.classList.contains("bp-prev")) { if (viewer) viewer.prevPage(); }
+                else if (btn.classList.contains("bp-next")) { if (viewer) viewer.nextPage(); }
+                else if (btn.classList.contains("bp-zin")) { if (viewer) viewer.zoomIn(); }
+                else if (btn.classList.contains("bp-zout")) { if (viewer) viewer.zoomOut(); }
                 // Tabs
                 else if (btn.classList.contains("bp-tab")) {
                     var tab = btn.getAttribute("data-tab");
@@ -815,61 +640,23 @@
                 }
             });
         }
-
-        batchFileState[idx]._render = render;
     }
 
     function loadBatchPdf(idx, filename, blobUrl) {
-        var url = blobUrl || "/api/uploaded/" + encodeURIComponent(filename);
         var s = batchFileState[idx];
-        if (!s) return;
-        if (typeof pdfjsLib === "undefined") return;
-        pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-        pdfjsLib.getDocument(url).promise.then(function (doc) {
-            s.pdfDoc = doc;
-            s.total = doc.numPages;
-            s.page = 1;
-            // Render immediately; if canvas has no layout yet, retry shortly
-            s._render();
-            setTimeout(function () { s._render(); }, 300);
-        }).catch(function (err) {
-            console.error("Batch PDF load error for idx " + idx + ":", err);
-        });
+        if (!s || !s.viewer) return;
+        var url = blobUrl || "/api/uploaded/" + encodeURIComponent(filename);
+        s.viewer.loadUrl(url);
+        // Retry render shortly in case canvas had no layout yet
+        setTimeout(function () { if (s.viewer) s.viewer.render(); }, 300);
     }
 
-    function drawBatchRegions(idx) {
-        var overlay = document.getElementById("bp-overlay-" + idx);
-        var canvas = document.getElementById("bp-canvas-" + idx);
-        if (!overlay || !canvas) return;
-        overlay.innerHTML = "";
+    function setBatchRegions(idx, regionData) {
+        batchRegionData[idx] = regionData;
         var s = batchFileState[idx];
-        if (!s) return;
-        var pageIdx = s.page - 1;
-        var regions = (currentPageRegions._batch || {})[idx];
-        if (!regions || !regions[pageIdx]) return;
-        var cw = canvas.width, ch = canvas.height;
-        regions[pageIdx].forEach(function (r, ri) {
-            if (!r.bbox_2d || r.bbox_2d.length < 4) return;
-            var rect = document.createElement("div");
-            rect.className = "region-rect";
-            rect.setAttribute("data-page", pageIdx);
-            rect.setAttribute("data-region", ri);
-            rect.style.left = (r.bbox_2d[0] / 1000 * cw) + "px";
-            rect.style.top = (r.bbox_2d[1] / 1000 * ch) + "px";
-            rect.style.width = ((r.bbox_2d[2] - r.bbox_2d[0]) / 1000 * cw) + "px";
-            rect.style.height = ((r.bbox_2d[3] - r.bbox_2d[1]) / 1000 * ch) + "px";
-            rect.title = (r.label || "region") + " — click to copy";
-            (function (content) {
-                rect.addEventListener("click", function () {
-                    if (!content) return;
-                    navigator.clipboard.writeText(content.trim()).then(function () {
-                        rect.classList.add("copied");
-                        setTimeout(function () { rect.classList.remove("copied"); }, 800);
-                    });
-                });
-            })(r.content);
-            overlay.appendChild(rect);
-        });
+        if (s && s.viewer) {
+            s.viewer.setRegions(regionData);
+        }
     }
 
     function _renderMdHtml(md, fileStem) {
@@ -915,11 +702,12 @@
     }
 
     // Rebuild per-file markdown from JSON regions (1:1 mapping) + wire hover sync
+    // The PdfViewer handles PDF→markdown hover via onRegionHover/onRegionLeave callbacks.
+    // This function only builds the markdown-side region blocks and markdown→PDF hover.
     function wireBatchRegionSync(idx) {
-        var regions = (currentPageRegions._batch || {})[idx];
+        var regions = batchRegionData[idx];
         if (!regions) return;
         var mdEl = document.getElementById("bp-md-" + idx);
-        var overlay = document.getElementById("bp-overlay-" + idx);
         if (!mdEl) return;
 
         // Rebuild markdown preview: one div per region with data-page/data-region
@@ -947,23 +735,21 @@
                 var stem = batchFileState[idx] ? batchFileState[idx].fileStem : "";
                 block.innerHTML = _renderMdHtml(content, stem);
 
-                // Markdown → PDF hover
+                // Markdown → PDF hover (uses PdfViewer.highlightRegion)
                 (function (el, pg, region) {
                     el.addEventListener("mouseenter", function () {
                         el.classList.add("region-hover");
-                        // Highlight PDF box: navigate to page if needed, then activate
                         var s = batchFileState[idx];
-                        if (s && s.page !== pg + 1) {
-                            s.page = pg + 1;
-                            s._render();
-                            setTimeout(function () { _activateBatchRect(idx, region); }, 300);
-                        } else {
-                            _activateBatchRect(idx, region);
+                        if (s && s.viewer) {
+                            s.viewer.highlightRegion(region, pg);
                         }
                     });
                     el.addEventListener("mouseleave", function () {
                         el.classList.remove("region-hover");
-                        _clearBatchRectHighlight(idx);
+                        var s = batchFileState[idx];
+                        if (s && s.viewer) {
+                            s.viewer.clearHighlight();
+                        }
                     });
                     el.addEventListener("click", function () {
                         if (content) navigator.clipboard.writeText(content.trim()).then(function () {
@@ -979,45 +765,6 @@
         }
         mdEl.innerHTML = "";
         mdEl.appendChild(container);
-
-        // PDF → markdown hover (event delegation on overlay)
-        if (overlay && !overlay._batchSyncWired) {
-            overlay._batchSyncWired = true;
-            overlay.addEventListener("mouseenter", function (e) {
-                var rect = e.target.closest(".region-rect");
-                if (!rect) return;
-                rect.classList.add("active");
-                var pg = rect.getAttribute("data-page");
-                var ri = rect.getAttribute("data-region");
-                var mdBlock = mdEl.querySelector('.region-block[data-page="' + pg + '"][data-region="' + ri + '"]');
-                if (mdBlock) {
-                    mdBlock.classList.add("region-hover");
-                    mdBlock.scrollIntoView({ behavior: "smooth", block: "center" });
-                }
-            }, true);
-            overlay.addEventListener("mouseleave", function (e) {
-                var rect = e.target.closest(".region-rect");
-                if (!rect) return;
-                rect.classList.remove("active");
-                mdEl.querySelectorAll(".region-hover").forEach(function (el) {
-                    el.classList.remove("region-hover");
-                });
-            }, true);
-        }
-    }
-
-    function _activateBatchRect(idx, regionIdx) {
-        var overlay = document.getElementById("bp-overlay-" + idx);
-        if (!overlay) return;
-        overlay.querySelectorAll(".region-rect.active").forEach(function (el) { el.classList.remove("active"); });
-        var target = overlay.querySelector('.region-rect[data-region="' + regionIdx + '"]');
-        if (target) target.classList.add("active");
-    }
-
-    function _clearBatchRectHighlight(idx) {
-        var overlay = document.getElementById("bp-overlay-" + idx);
-        if (!overlay) return;
-        overlay.querySelectorAll(".region-rect.active").forEach(function (el) { el.classList.remove("active"); });
     }
 
     function doBatchUpload(files, list) {
@@ -1112,17 +859,14 @@
                         var localUrl = URL.createObjectURL(f);
                         loadBatchPdf(i, null, localUrl);
                     } else if (["png","jpg","jpeg","tif","tiff","bmp","webp"].indexOf(ext) >= 0) {
-                        var canvas = document.getElementById("bp-canvas-" + i);
-                        if (canvas) {
+                        var bs = batchFileState[i];
+                        if (bs && bs.viewer) {
                             var img = new Image();
-                            img.onload = function () {
-                                var wrap = document.getElementById("bp-wrap-" + i);
-                                var maxW = wrap ? wrap.clientWidth - 20 : 500;
-                                var scale = Math.min(maxW / img.width, 1);
-                                canvas.width = img.width * scale;
-                                canvas.height = img.height * scale;
-                                canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-                            };
+                            (function (viewer) {
+                                img.onload = function () {
+                                    viewer.renderImage(img);
+                                };
+                            })(bs.viewer);
                             img.src = URL.createObjectURL(f);
                         }
                     }
@@ -1219,14 +963,13 @@
                         var pr = typeof data.partial_regions === "string"
                             ? JSON.parse(data.partial_regions) : data.partial_regions;
                         if (pr && pr.length) {
-                            if (!currentPageRegions._batch) currentPageRegions._batch = {};
-                            currentPageRegions._batch[batchIdx] = {};
+                            var regionMap = {};
                             for (var p = 0; p < pr.length; p++) {
-                                currentPageRegions._batch[batchIdx][p] = (pr[p] || []).map(function (r) {
+                                regionMap[p] = (pr[p] || []).map(function (r) {
                                     return { bbox_2d: r.bbox_2d, label: r.label || r.task_type, content: r.content };
                                 });
                             }
-                            drawBatchRegions(batchIdx);
+                            setBatchRegions(batchIdx, regionMap);
                             wireBatchRegionSync(batchIdx);
                         }
                     } catch (e) {}
@@ -1237,6 +980,7 @@
             } else {
                 updatePipeline(data);
                 updateProgress(data);
+                if (typeof EventBus !== "undefined") EventBus.emit("progress", data);
 
                 // Live markdown preview
                 if (data.markdown) {
@@ -1251,18 +995,7 @@
                         var pr = typeof data.partial_regions === "string"
                             ? JSON.parse(data.partial_regions) : data.partial_regions;
                         if (pr && pr.length) {
-                            // Update region data and redraw
-                            for (var p = 0; p < pr.length; p++) {
-                                currentPageRegions[p] = (pr[p] || []).map(function (r, i) {
-                                    return {
-                                        bbox_2d: r.bbox_2d,
-                                        label: r.label || r.task_type,
-                                        content: r.content,
-                                        regionIdx: r.index != null ? r.index : i,
-                                    };
-                                });
-                            }
-                            drawPageRegions(pdfCurrentPage - 1);
+                            setRegionData(pr);
                         }
                     } catch (e) {}
                 }
@@ -1315,14 +1048,13 @@
                             .then(function (r) { return r.json(); })
                             .then(function (data) {
                                 if (data.regions && data.regions.length) {
-                                    if (!currentPageRegions._batch) currentPageRegions._batch = {};
-                                    currentPageRegions._batch[bi] = {};
+                                    var regionMap = {};
                                     for (var p = 0; p < data.regions.length; p++) {
-                                        currentPageRegions._batch[bi][p] = (data.regions[p] || []).map(function (r, i) {
+                                        regionMap[p] = (data.regions[p] || []).map(function (r, i) {
                                             return { bbox_2d: r.bbox_2d, label: r.label || r.task_type, content: r.content };
                                         });
                                     }
-                                    drawBatchRegions(bi);
+                                    setBatchRegions(bi, regionMap);
                                     wireBatchRegionSync(bi);
                                 }
                             }).catch(function () {});
@@ -1634,38 +1366,6 @@
         });
     }
 
-    // Wire PDF overlay → markdown highlight (called after region data is loaded)
-    function wireRegionSync() {
-        if (!pdfOverlay || !mdPreview) return;
-
-        // Use event delegation on the overlay
-        pdfOverlay.addEventListener("mouseenter", function (e) {
-            var rect = e.target.closest(".region-rect");
-            if (!rect) return;
-            rect.classList.add("active");
-            var pg = rect.getAttribute("data-page");
-            var ri = rect.getAttribute("data-region");
-            // Find and highlight matching markdown block
-            var mdBlock = mdPreview.querySelector(
-                '.region-block[data-page="' + pg + '"][data-region="' + ri + '"]'
-            );
-            if (mdBlock) {
-                mdBlock.classList.add("region-hover");
-                mdBlock.scrollIntoView({ behavior: "smooth", block: "center" });
-            }
-        }, true);
-
-        pdfOverlay.addEventListener("mouseleave", function (e) {
-            var rect = e.target.closest(".region-rect");
-            if (!rect) return;
-            rect.classList.remove("active");
-            // Clear all markdown highlights
-            mdPreview.querySelectorAll(".region-hover").forEach(function (el) {
-                el.classList.remove("region-hover");
-            });
-        }, true);
-    }
-
     // Rebuild markdown preview from JSON region data so each region is
     // a single hoverable block with an exact data-region index matching
     // the PDF overlay.  Called once region data arrives from the backend.
@@ -1767,7 +1467,7 @@
     }
 
     function scrollPdfToPage(pageNum) {
-        goToPdfPage(pageNum);
+        if (mainViewer) mainViewer.setPage(pageNum);
     }
 
     // ── Output Tab Switching (3 tabs) ──────────────
@@ -1848,9 +1548,9 @@
                 if (data.regions && data.regions.length > 0) {
                     setRegionData(data.regions);
                     // Rebuild markdown preview from JSON so each region
-                    // is a single block with exact data-region index
+                    // is a single block with exact data-region index.
+                    // PDF→markdown hover is handled by PdfViewer callbacks.
                     renderRegionAnnotatedMarkdown(data.regions);
-                    wireRegionSync();
                 }
             })
             .catch(function () {});
@@ -2408,7 +2108,7 @@
         }
         localStorage.setItem("layoutMode", mode);
         // Re-render PDF to fit new container width
-        if (pdfDoc) setTimeout(function () { renderPdfPage(pdfCurrentPage); }, 100);
+        if (mainViewer && mainViewer.getDoc()) setTimeout(function () { mainViewer.render(); }, 100);
     }
 
     if (layoutToggle) {
