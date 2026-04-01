@@ -149,11 +149,18 @@
      */
     PdfViewer.prototype.renderImage = function (img) {
         if (!this._canvas) return;
+        this._img = img;
+        this._totalPages = 1;
+        this._currentPage = 1;
         var maxW = this._wrap ? this._wrap.clientWidth - 20 : 500;
         var scale = Math.min(maxW / img.width, 1);
         this._canvas.width = img.width * scale;
         this._canvas.height = img.height * scale;
         this._canvas.getContext("2d").drawImage(img, 0, 0, this._canvas.width, this._canvas.height);
+        this._positionOverlay();
+        if (this._regions[0]) {
+            this._drawRegions(0);
+        }
     };
 
     // ── Region Data ──────────────────────────────────
@@ -180,7 +187,7 @@
             }
         }
 
-        if (this._doc) {
+        if (this._doc || this._img) {
             this._drawRegions(this._currentPage - 1);
         }
     };

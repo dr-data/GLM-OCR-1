@@ -1260,7 +1260,7 @@
                 }
                 return code;
             },
-            breaks: false,
+            breaks: true,
             gfm: true,
         });
 
@@ -1380,7 +1380,7 @@
                 }
                 return code;
             },
-            breaks: false,
+            breaks: true,
             gfm: true,
         });
 
@@ -2458,7 +2458,12 @@
             '</div>';
 
         document.body.appendChild(modal);
-        modal.querySelector(".fe-modal-close").addEventListener("click", function () { modal.remove(); });
+        modal.querySelector(".fe-modal-close").addEventListener("click", function () {
+            if (cvState.doc && cvState.doc.destroy) cvState.doc.destroy();
+            cvState.doc = null;
+            cvState.img = null;
+            modal.remove();
+        });
 
         // Layout toggle
         var layoutMode = "horizontal";
@@ -2484,15 +2489,42 @@
             });
         });
 
-        // PDF state
-        var cvState = { doc: null, page: 1, total: 0, zoom: 1.0, regions: null, rawMd: "" };
+        // PDF / image state
+        var cvState = { doc: null, img: null, page: 1, total: 0, zoom: 1.0, regions: null, rawMd: "" };
         var canvas = document.getElementById("fe-cv-canvas");
         var wrap = document.getElementById("fe-cv-wrap");
         var overlay = document.getElementById("fe-cv-overlay");
         var mdEl = document.getElementById("fe-cv-md");
 
+        function _cvPositionOverlay() {
+            if (overlay && wrap) {
+                var cr = canvas.getBoundingClientRect();
+                var wr = wrap.getBoundingClientRect();
+                overlay.style.left = (cr.left - wr.left + wrap.scrollLeft) + "px";
+                overlay.style.top = (cr.top - wr.top + wrap.scrollTop) + "px";
+                overlay.style.width = canvas.width + "px";
+                overlay.style.height = canvas.height + "px";
+            }
+        }
+
         function cvRender() {
-            if (!cvState.doc || !canvas) return;
+            if (!canvas) return;
+            if (cvState.img) {
+                if (!cvState.img.naturalWidth || !cvState.img.naturalHeight) return;
+                var cw = (wrap && wrap.clientWidth > 40) ? wrap.clientWidth - 20 : 400;
+                var ch = (wrap && wrap.clientHeight > 40) ? wrap.clientHeight - 20 : 500;
+                var base = Math.min(cw / cvState.img.naturalWidth, ch / cvState.img.naturalHeight);
+                var sc = base * cvState.zoom;
+                canvas.width = cvState.img.naturalWidth * sc;
+                canvas.height = cvState.img.naturalHeight * sc;
+                canvas.getContext("2d").drawImage(cvState.img, 0, 0, canvas.width, canvas.height);
+                _cvPositionOverlay();
+                cvDrawBoxes();
+                document.getElementById("fe-cv-page").textContent = "1 / 1";
+                document.getElementById("fe-cv-zoom").textContent = Math.round(cvState.zoom * 100) + "%";
+                return;
+            }
+            if (!cvState.doc) return;
             cvState.doc.getPage(cvState.page).then(function (page) {
                 var cw = (wrap && wrap.clientWidth > 40) ? wrap.clientWidth - 20 : 400;
                 var ch = (wrap && wrap.clientHeight > 40) ? wrap.clientHeight - 20 : 500;
@@ -2503,14 +2535,7 @@
                 canvas.width = vp.width;
                 canvas.height = vp.height;
                 page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise.then(function () {
-                    if (overlay && wrap) {
-                        var cr = canvas.getBoundingClientRect();
-                        var wr = wrap.getBoundingClientRect();
-                        overlay.style.left = (cr.left - wr.left + wrap.scrollLeft) + "px";
-                        overlay.style.top = (cr.top - wr.top + wrap.scrollTop) + "px";
-                        overlay.style.width = canvas.width + "px";
-                        overlay.style.height = canvas.height + "px";
-                    }
+                    _cvPositionOverlay();
                     cvDrawBoxes();
                 });
             });
@@ -2628,16 +2653,37 @@
         document.getElementById("fe-cv-zin").addEventListener("click", function () { cvState.zoom = Math.min(cvState.zoom + 0.25, 3.0); cvRender(); });
         document.getElementById("fe-cv-zout").addEventListener("click", function () { cvState.zoom = Math.max(cvState.zoom - 0.25, 0.5); cvRender(); });
 
-        // Load PDF
-        if (folder.input_file && typeof pdfjsLib !== "undefined") {
-            pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-            var pdfUrl = "/api/uploaded/" + encodeURIComponent(folder.input_file);
-            pdfjsLib.getDocument(pdfUrl).promise.then(function (doc) {
-                cvState.doc = doc;
-                cvState.total = doc.numPages;
-                cvState.page = 1;
-                cvRender();
-            });
+        // Load input file (PDF or image)
+        if (folder.input_file) {
+            var inputUrl = "/api/uploaded/" + encodeURIComponent(folder.input_file);
+            var isImage = /\.(png|jpg|jpeg|webp|bmp|tiff?)$/i.test(folder.input_file);
+            if (isImage) {
+                var img = new Image();
+                img.onload = function () {
+                    cvState.img = img;
+                    cvState.doc = null;
+                    cvState.total = 1;
+                    cvState.page = 1;
+                    var prevBtn = document.getElementById("fe-cv-prev");
+                    var nextBtn = document.getElementById("fe-cv-next");
+                    if (prevBtn) prevBtn.disabled = true;
+                    if (nextBtn) nextBtn.disabled = true;
+                    cvRender();
+                };
+                img.onerror = function () {
+                    var pageEl = document.getElementById("fe-cv-page");
+                    if (pageEl) pageEl.textContent = "Load failed";
+                };
+                img.src = inputUrl;
+            } else if (typeof pdfjsLib !== "undefined") {
+                pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+                pdfjsLib.getDocument(inputUrl).promise.then(function (doc) {
+                    cvState.doc = doc;
+                    cvState.total = doc.numPages;
+                    cvState.page = 1;
+                    cvRender();
+                });
+            }
         }
 
         // Load JSON regions + build preview markdown

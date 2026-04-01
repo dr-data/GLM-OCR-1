@@ -1037,18 +1037,21 @@ details.batch-item[open] summary::before {
 
 .pdf-overlay .region-rect {
     position: absolute;
-    border: var(--box-border-width, 2px) solid var(--box-outline, rgba(0, 204, 204, 0.3));
-    background: var(--box-fill, rgba(0, 204, 204, 0.05));
+    border: 2px solid #00e6e6;
+    background: rgba(0, 204, 204, 0.1);
+    outline: 1px solid rgba(0, 0, 0, 0.6);
+    outline-offset: 0px;
     pointer-events: auto;
     cursor: pointer;
-    transition: background 0.15s, border-color 0.15s;
+    transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
     border-radius: 2px;
 }
 
 .pdf-overlay .region-rect:hover,
 .pdf-overlay .region-rect.active {
-    border-color: var(--box-outline-active, rgba(0, 204, 204, 0.8));
-    background: var(--box-fill-active, rgba(0, 204, 204, 0.15));
+    border-color: #00ffff;
+    background: rgba(0, 230, 230, 0.2);
+    box-shadow: 0 0 8px rgba(0, 255, 255, 0.6);
 }
 
 .pdf-overlay .region-rect.copied {
